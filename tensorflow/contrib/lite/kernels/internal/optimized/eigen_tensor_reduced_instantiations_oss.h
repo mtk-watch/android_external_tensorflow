@@ -150,7 +150,9 @@ typedef unsigned __int64 uint64_t;
 #include "unsupported/Eigen/CXX11/src/Tensor/TensorGenerator.h"
 #include "unsupported/Eigen/CXX11/src/Tensor/TensorAssign.h"
 #include "unsupported/Eigen/CXX11/src/Tensor/TensorScan.h"
-#include "unsupported/Eigen/CXX11/src/Tensor/TensorTrace.h"
+// No TensorTrace.h exsists in current Eigen project in Android.
+// TODO: uncomment once Eigen got updated.
+// #include "unsupported/Eigen/CXX11/src/Tensor/TensorTrace.h"
 #include "unsupported/Eigen/CXX11/src/Tensor/TensorSycl.h"
 #include "unsupported/Eigen/CXX11/src/Tensor/TensorExecutor.h"
 #include "unsupported/Eigen/CXX11/src/Tensor/TensorDevice.h"

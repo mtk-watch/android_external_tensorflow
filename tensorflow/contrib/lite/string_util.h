@@ -43,7 +43,7 @@ limitations under the License.
 #include <vector>
 
 #include "tensorflow/contrib/lite/context.h"
-#include "tensorflow/contrib/lite/string.h"
+#include "tensorflow/contrib/lite/string_tflite.h"
 
 namespace tflite {
 
