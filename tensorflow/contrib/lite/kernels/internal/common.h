@@ -28,7 +28,8 @@ limitations under the License.
 #endif
 
 #if defined __GNUC__ && defined __SSE4_1__
-#define USE_NEON
+// TODO: Uncomment once NEON_2_SSE.h is imported to Android
+// #define USE_NEON
 
 #define OPTIMIZED_OPS_H__IGNORE_DEPRECATED_DECLARATIONS
 #pragma GCC diagnostic push
@@ -39,7 +40,8 @@ limitations under the License.
 #pragma GCC diagnostic ignored "-Wnarrowing"
 #pragma GCC diagnostic ignored "-Wsequence-point"
 
-#include "NEON_2_SSE.h"
+// TODO: Uncomment once NEON_2_SSE.h is imported to Android
+// #include "NEON_2_SSE.h"
 
 #pragma GCC diagnostic pop
 #endif
