@@ -36,7 +36,7 @@ limitations under the License.
 #elif defined(TFLITE_REDUCE_INSTANTIATIONS_OPEN_SOURCE)
 #include "tensorflow/contrib/lite/kernels/internal/optimized/eigen_tensor_reduced_instantiations_oss.h"
 #else
-#include "third_party/eigen3/unsupported/Eigen/CXX11/Tensor"
+#include "unsupported/Eigen/CXX11/Tensor"
 #endif
 
 
