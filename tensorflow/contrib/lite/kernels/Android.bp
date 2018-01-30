@@ -23,6 +23,9 @@ cc_library_static {
         "internal/reference/portable_tensor_utils.cc",
         "internal/optimized/neon_tensor_utils.cc",
     ],
+    cflags: [
+        "-Wno-extern-c-compat",
+    ]
 }
 
 cc_library_static {
@@ -58,9 +61,11 @@ cc_library_static {
         "space_to_batch_nd.cc",
         "space_to_depth.cc",
         "squeeze.cc",
+        "strided_slice.cc",
         "sub.cc",
         "svdf.cc",
         "transpose.cc",
+        "unidirectional_sequence_lstm.cc",
         "unidirectional_sequence_rnn.cc",
         "internal/tensor_utils.cc",
         "internal/quantization_util.cc",
@@ -76,6 +81,7 @@ cc_library_static {
     cflags: [
         "-DNAMESPACE_FOR_HASH_FUNCTIONS=farmhash",
         "-Wno-array-bounds",
+        "-Wno-extern-c-compat",
         "-Wno-invalid-partial-specialization",
         "-Wno-missing-field-initializers",
         "-Wno-sign-compare",
