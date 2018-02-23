@@ -107,13 +107,6 @@ REGISTER_OP("SkipDataset")
     .Attr("output_shapes: list(shape) >= 1")
     .SetShapeFn(shape_inference::ScalarShape);
 
-REGISTER_OP("IgnoreErrorsDataset")
-    .Input("input_dataset: variant")
-    .Output("handle: variant")
-    .Attr("output_types: list(type) >= 1")
-    .Attr("output_shapes: list(shape) >= 1")
-    .SetShapeFn(shape_inference::ScalarShape);
-
 REGISTER_OP("BytesProducedStatsDataset")
     .Input("input_dataset: variant")
     .Input("tag: string")
@@ -490,5 +483,30 @@ REGISTER_OP("StatsAggregatorSummary")
     .Input("iterator: resource")
     .Output("summary: string")
     .SetShapeFn(shape_inference::ScalarShape);
+
+REGISTER_OP("PrependFromQueueAndPaddedBatchDataset")
+    .Input("input_dataset: variant")
+    .Input("batch_size: int64")
+    .Input("padded_shapes: N * int64")
+    .Input("padding_values: Toutput_types")
+    .Output("handle: variant")
+    .Attr("Toutput_types: list(type) >= 1")
+    .Attr("output_shapes: list(shape) >= 1")
+    .Attr("N: int >= 1")
+    // TODO(ebrevdo): Validate that `padded_shapes` are all vectors, the lengths
+    // of `Toutput_types` and `output_shapes` are `N`, that the
+    // length of `output_types` is `N`, the `output_shapes` are
+    // (as far as possible to tell statically) compatible with `padded_shapes`,
+    // and that `padding_values` are all scalars.
+    .SetShapeFn(shape_inference::ScalarShape);
+
+REGISTER_OP("EnqueueInQueueDataset")
+    .Input("queue: variant")
+    .Input("components: Tcomponents")
+    .Attr("Tcomponents: list(type) >= 1")
+    .SetIsStateful()  // To avoid CSE on multiple calls to Enqueue.
+    // TODO(ebrevdo): SetShapeFn to test input dtypes and shapes by
+    // reading from queue handle (is that even possible?).
+    .SetShapeFn(shape_inference::NoOutputs);
 
 }  // namespace tensorflow

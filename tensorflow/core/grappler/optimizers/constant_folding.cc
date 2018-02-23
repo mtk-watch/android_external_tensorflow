@@ -808,20 +808,26 @@ NodeDef ConstantFolding::CreateNodeDef(const string& name,
   // Use the packed representation whenever possible to avoid generating large
   // graphdefs. Moreover, avoid repeating the last values if they're equal.
   if (tensor->NumElements() > 4) {
-#define POPULATE_TENSOR_PROTO(tensor, t, TYPE, NAME)         \
-  optimized = true;                                          \
-  TYPE last = tensor->flat<TYPE>()(0);                       \
-  int last_index = 0;                                        \
-  for (int i = 0; i < tensor->NumElements(); ++i) {          \
-    TYPE cur = tensor->flat<TYPE>()(i);                      \
-    t->add_##NAME##_val(cur);                                \
-    if (cur != last) {                                       \
-      last = cur;                                            \
-      last_index = i;                                        \
-    }                                                        \
-  }                                                          \
-  /* Remove all identical trailing values to save memory. */ \
-  t->mutable_##NAME##_val()->Truncate(last_index + 1);
+#define POPULATE_TENSOR_PROTO(tensor, t, TYPE, NAME)                \
+  const TYPE* val_ptr = tensor->flat<TYPE>().data();                \
+  TYPE last = *val_ptr;                                             \
+  int64 last_index = 0;                                             \
+  for (int64 i = 0; i < tensor->NumElements(); ++i) {               \
+    TYPE cur = *val_ptr++;                                          \
+    if (cur != last) {                                              \
+      last = cur;                                                   \
+      last_index = i;                                               \
+    }                                                               \
+  }                                                                 \
+  if (last_index < kint32max) {                                     \
+    optimized = true;                                               \
+    t->mutable_##NAME##_val()->Reserve(last_index + 1);             \
+    t->mutable_##NAME##_val()->AddNAlreadyReserved(last_index + 1); \
+    val_ptr = tensor->flat<TYPE>().data();                          \
+    for (int64 i = 0; i <= last_index; ++i) {                       \
+      t->set_##NAME##_val(i, *val_ptr++);                           \
+    }                                                               \
+  }
 
     if (tensor->dtype() == DT_FLOAT) {
       POPULATE_TENSOR_PROTO(tensor, t, float, float)
@@ -1369,6 +1375,29 @@ void ConstantFolding::ReplaceOperationWithIdentity(int input_to_forward,
   graph_modified_ = true;
 }
 
+void ConstantFolding::ReplaceOperationWithSnapshot(int input_to_forward,
+                                                   NodeDef* node,
+                                                   GraphDef* graph) {
+  node->set_op("Snapshot");
+  DataType dtype = node->attr().at("T").type();
+  node->clear_attr();
+  (*node->mutable_attr())["T"].set_type(dtype);
+
+  // Propagate the designated input through the Snapshot.
+  node->mutable_input()->SwapElements(0, input_to_forward);
+  // Add all other inputs as control dependencies.
+  for (int i = 1; i < node->input_size(); ++i) {
+    if (IsControlInput(node->input(i))) {
+      break;
+    }
+    const string ctrl_dep =
+        AddControlDependency(node->input(i), graph, node_map_.get());
+    node_map_->UpdateInput(node->name(), node->input(i), ctrl_dep);
+    node->set_input(i, ctrl_dep);
+  }
+  graph_modified_ = true;
+}
+
 void ConstantFolding::ReplaceDivisionOfOnesByReciprocal(NodeDef* node,
                                                         GraphDef* graph) {
   node->set_op("Reciprocal");
@@ -1437,15 +1466,14 @@ Status ConstantFolding::SimplifyGraph(GraphDef* output,
       graph_modified_ = true;
       continue;
     }
-    const bool safe_to_use_shapes =
-        use_shape_info && (feed_nodes_.empty() || is_aggressive);
+
     const bool is_mul = IsMul(*node);
     const bool is_matmul = IsMatMul(*node);
     const bool is_add = IsAdd(*node) || IsBiasAdd(*node);
     const bool is_sub = IsSub(*node);
     const bool is_any_div = IsAnyDiv(*node);
     // Simplify arithmetic operations with ones or zeros.
-    if (safe_to_use_shapes &&
+    if (use_shape_info &&
         (is_mul || is_matmul || is_add || is_sub || is_any_div) &&
         properties.HasInputProperties(node->name()) &&
         properties.HasOutputProperties(node->name())) {
@@ -1469,7 +1497,7 @@ Status ConstantFolding::SimplifyGraph(GraphDef* output,
           ((is_mul && x_is_one) || (is_add && x_is_zero))) {
         // TODO(rmlarsen): Handle subtraction 0 - y.
         // 1 * y = y or 0 + y = y.
-        ReplaceOperationWithIdentity(1, node, output);
+        ReplaceOperationWithSnapshot(1, node, output);
         continue;
       }
 
@@ -1489,9 +1517,9 @@ Status ConstantFolding::SimplifyGraph(GraphDef* output,
       const bool x_matches_output_shape = ShapesEqual(output_shape, x_shape);
       if (x_matches_output_shape &&
           (((is_mul || is_any_div) && y_is_one) ||
-           ((is_add || is_sub) && y_is_zero && is_aggressive))) {
+           ((is_add || is_sub) && y_is_zero))) {
         // x * 1 = x or x / 1 = x or x +/- 0 = x
-        ReplaceOperationWithIdentity(0, node, output);
+        ReplaceOperationWithSnapshot(0, node, output);
         continue;
       }
 
@@ -1658,7 +1686,7 @@ Status ConstantFolding::RunOptimizationPass(Cluster* cluster,
   // more with the original node name.
   for (const auto& fetch : item.fetch) {
     const NodeDef* fetch_node = node_map_->GetNode(fetch);
-    if (fetch_node && NumOutputs(*fetch_node) == 1) {
+    if (fetch_node && NumOutputs(*fetch_node, graph_) == 1) {
       nodes_whitelist_.insert(fetch_node->name());
     }
   }

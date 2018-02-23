@@ -629,6 +629,7 @@ cc_library(
         ":transpose_op",
         ":unique_op",
         ":unpack_op",
+        ":unravel_index_op",
         ":where_op",
     ],
 )
@@ -884,6 +885,12 @@ tf_kernel_library(
 )
 
 tf_kernel_library(
+    name = "unravel_index_op",
+    prefix = "unravel_index_op",
+    deps = ARRAY_DEPS,
+)
+
+tf_kernel_library(
     name = "where_op",
     srcs = ["where_op.cc"],
     hdrs = ["where_op.h"],
@@ -980,6 +987,7 @@ tf_cuda_cc_test(
     name = "constant_op_test",
     size = "small",
     srcs = ["constant_op_test.cc"],
+    tags = ["no_cuda_on_cpu_tap"],
     deps = [
         ":constant_op",
         ":ops_testutil",
@@ -1033,7 +1041,7 @@ tf_cc_test(
 
 tf_cc_test(
     name = "conv_ops_test",
-    size = "small",
+    size = "medium",
     srcs = ["conv_ops_test.cc"],
     deps = [
         ":conv_ops",
@@ -1935,6 +1943,17 @@ tf_kernel_library(
     ],
 )
 
+tf_kernel_library(
+    name = "functional_ops",
+    prefix = "functional_ops",
+    deps = [
+        "//tensorflow/core:framework",
+        "//tensorflow/core:functional_ops_op_lib",
+        "//tensorflow/core:lib",
+        "//third_party/eigen3",
+    ],
+)
+
 cc_library(
     name = "image",
     deps = [
@@ -2573,6 +2592,45 @@ tf_cc_tests(
         ":logging",
         ":ops_testutil",
         ":ops_util",
+        "//tensorflow/core:framework",
+        "//tensorflow/core:lib",
+        "//tensorflow/core:protos_all_cc",
+        "//tensorflow/core:test",
+        "//tensorflow/core:test_main",
+        "//tensorflow/core:testlib",
+    ],
+)
+
+cc_library(
+    name = "manip",
+    deps = [
+        ":roll_op",
+    ],
+)
+
+MANIP_DEPS = [
+    "//tensorflow/core:framework",
+    "//tensorflow/core:lib",
+    "//tensorflow/core:manip_ops_op_lib",
+    "//third_party/eigen3",
+]
+
+tf_kernel_library(
+    name = "roll_op",
+    prefix = "roll_op",
+    deps = MANIP_DEPS,
+)
+
+tf_cc_test(
+    name = "roll_op_test",
+    size = "small",
+    srcs = ["roll_op_test.cc"],
+    deps = [
+        ":ops_testutil",
+        ":ops_util",
+        ":roll_op",
+        "//tensorflow/core:core_cpu",
+        "//tensorflow/core:core_cpu_internal",
         "//tensorflow/core:framework",
         "//tensorflow/core:lib",
         "//tensorflow/core:protos_all_cc",

@@ -52,7 +52,7 @@ namespace {
 
 class GrpcWorkerService : public AsyncServiceInterface {
   // TODO(ncteisen): consider adding a config var or flag for this
-  static constexpr const size_t kGrpcWorkerServiceThreadCount = 8;
+  static constexpr const size_t kGrpcWorkerServiceThreadCount = 2;
 
  public:
   GrpcWorkerService(GrpcWorker* worker, ::grpc::ServerBuilder* builder)
@@ -442,6 +442,24 @@ void GrpcWorker::GrpcRecvTensorAsync(CallOptions* opts,
           done(status);
         }
       });
+}
+
+void GrpcWorker::LoggingAsync(const LoggingRequest* request,
+                              LoggingResponse* response, StatusCallback done) {
+  auto env = this->env();
+  if (env) {
+    auto session_mgr = (SessionMgr*)env->session_mgr;
+    if (session_mgr) {
+      session_mgr->SetLogging(request->rpc_logging());
+      for (const auto& step_id : request->fetch_step_id()) {
+        session_mgr->RetrieveLogs(step_id, response);
+      }
+      if (request->clear()) {
+        session_mgr->ClearLogs();
+      }
+    }
+  }
+  done(Status::OK());
 }
 
 WorkerEnv* GrpcWorker::env() { return env_; }
