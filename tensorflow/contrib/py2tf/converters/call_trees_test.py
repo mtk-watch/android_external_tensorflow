@@ -20,16 +20,9 @@ from __future__ import print_function
 
 from tensorflow.contrib.py2tf.converters import call_trees
 from tensorflow.contrib.py2tf.converters import converter_test_base
-from tensorflow.contrib.py2tf.pyct import compiler
 from tensorflow.python.framework import constant_op
 from tensorflow.python.ops import math_ops
 from tensorflow.python.platform import test
-
-
-class TestNamer(call_trees.FunctionNamer):
-
-  def compiled_function_name(self, original_name, live_object=None):
-    return 'renamed_%s' % original_name
 
 
 class CallTreesTest(converter_test_base.TestCase):
@@ -46,12 +39,55 @@ class CallTreesTest(converter_test_base.TestCase):
       return test_fn_1(a) + 1
 
     node = self.parse_and_analyze(test_fn_2, {'test_fn_1': test_fn_1})
-    node = call_trees.transform(node, TestNamer(), {}, (), ())
-    result = compiler.ast_to_object(node)
-    # Only test_fn_2 is transformed, so we'll insert renamed_test_fn_1 manually.
-    setattr(result, 'renamed_test_fn_1', renamed_test_fn_1)
+    node = call_trees.transform(node, self.ctx, (), ())
 
-    self.assertEquals(3, result.test_fn_2(1))
+    with self.compiled(node) as result:
+      # Only test_fn_2 is transformed, so we'll insert renamed_test_fn_1
+      # manually.
+      result.renamed_test_fn_1 = renamed_test_fn_1
+      self.assertEquals(3, result.test_fn_2(1))
+
+  def test_simple_methods(self):
+
+    class TestClass(object):
+
+      def test_fn_1(self, a):
+        return a + 1
+
+      def test_fn_2(self, a):
+        return self.test_fn_1(a) + 1
+
+    node = self.parse_and_analyze(
+        TestClass.test_fn_2, {'TestClass': TestClass},
+        arg_types={'self': (TestClass.__name__, TestClass)})
+    node = call_trees.transform(node, self.ctx, (), ())
+
+    with self.compiled(node) as result:
+      tc = TestClass()
+      self.assertEquals(3, result.test_fn_2(tc, 1))
+
+  def test_py_func_wrap_no_retval(self):
+
+    def test_fn(a):
+      setattr(a, 'foo', 'bar')
+
+    node = self.parse_and_analyze(test_fn, {'setattr': setattr})
+    node = call_trees.transform(node, self.ctx, (), ())
+
+    with self.compiled(node) as result:
+      with self.test_session() as sess:
+        # The function has no return value, so we do some tricks to grab the
+        # generated py_func node and ensure its effect only happens at graph
+        # execution.
+
+        class Dummy(object):
+          pass
+
+        a = Dummy()
+        result.test_fn(a)
+        self.assertFalse(hasattr(a, 'foo'))
+        sess.run(sess.graph.get_operations()[0])
+        self.assertEquals('bar', a.foo)
 
   def test_uncompiled_modules(self):
 
@@ -64,20 +100,18 @@ class CallTreesTest(converter_test_base.TestCase):
         'math_ops': math_ops,
         'constant_op': constant_op
     })
-    node = call_trees.transform(node, TestNamer(), {},
+    node = call_trees.transform(node, self.ctx,
                                 set(((math_ops.__name__,),
                                      (constant_op.__name__,))), ())
-    result = compiler.ast_to_object(node)
-    setattr(result, 'math_ops', math_ops)
-    setattr(result, 'constant_op', constant_op)
 
-    with self.test_session() as sess:
-      # Not renamed, because the converter doesn't rename the definition itself.
-      # (the caller is responsible for that).
-      result_tensor = result.test_fn(constant_op.constant(1))
-      result_val = sess.run(result_tensor)
-
-    self.assertEquals(3, result_val)
+    with self.compiled(node) as result:
+      result.math_ops = math_ops
+      result.constant_op = constant_op
+      with self.test_session() as sess:
+        # Not renamed, because the converter doesn't rename the definition
+        # itself (the caller is responsible for that).
+        result_tensor = result.test_fn(constant_op.constant(1))
+        self.assertEquals(3, sess.run(result_tensor))
 
 
 if __name__ == '__main__':

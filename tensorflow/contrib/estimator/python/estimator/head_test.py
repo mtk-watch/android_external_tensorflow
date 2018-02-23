@@ -381,8 +381,8 @@ class MultiLabelHead(test.TestCase):
       _initialize_variables(self, monitored_session.Scaffold())
       with self.assertRaisesRegexp(
           errors.InvalidArgumentError,
-          r'loss_fn must return Tensor of shape \[batch_size, 1\]\. '
-          r'Given: \] \[2\]'):
+          r'\[loss_fn must return Tensor of shape \[D0, D1, ... DN, 1\]\. \] '
+          r'\[logits_shape: \] \[2 2\] \[loss_shape: \] \[2\]'):
         actual_training_loss.eval()
 
   def test_eval_labels_none(self):
@@ -446,7 +446,7 @@ class MultiLabelHead(test.TestCase):
         # auc and auc_pr cannot be reliably calculated for only 4 samples, but
         # this assert tests that the algorithm remains consistent.
         keys.AUC: 0.3333,
-        keys.AUC_PR: 0.7639,
+        keys.AUC_PR: 0.5972,
     }
     self._test_eval(
         head=head,
@@ -478,7 +478,7 @@ class MultiLabelHead(test.TestCase):
         # auc and auc_pr cannot be reliably calculated for only 4 samples, but
         # this assert tests that the algorithm remains consistent.
         keys.AUC: 0.3333,
-        keys.AUC_PR: 0.7639,
+        keys.AUC_PR: 0.5972,
     }
     self._test_eval(
         head=head,
@@ -509,7 +509,7 @@ class MultiLabelHead(test.TestCase):
         # auc and auc_pr cannot be reliably calculated for only 4 samples, but
         # this assert tests that the algorithm remains consistent.
         keys.AUC: 0.3333,
-        keys.AUC_PR: 0.7639,
+        keys.AUC_PR: 0.5972,
     }
     self._test_eval(
         head=head,
@@ -543,7 +543,7 @@ class MultiLabelHead(test.TestCase):
         # auc and auc_pr cannot be reliably calculated for only 4 samples, but
         # this assert tests that the algorithm remains consistent.
         keys.AUC: 0.3333,
-        keys.AUC_PR: 0.7639,
+        keys.AUC_PR: 0.5972,
     }
     self._test_eval(
         head=head,
@@ -573,7 +573,7 @@ class MultiLabelHead(test.TestCase):
         # auc and auc_pr cannot be reliably calculated for only 4 samples, but
         # this assert tests that the algorithm remains consistent.
         keys.AUC: 0.3333,
-        keys.AUC_PR: 0.7639,
+        keys.AUC_PR: 0.5972,
         keys.ACCURACY_AT_THRESHOLD % thresholds[0]: 2. / 4.,
         keys.PRECISION_AT_THRESHOLD % thresholds[0]: 2. / 3.,
         keys.RECALL_AT_THRESHOLD % thresholds[0]: 2. / 3.,
@@ -621,7 +621,7 @@ class MultiLabelHead(test.TestCase):
         # auc and auc_pr cannot be reliably calculated for only 4 samples, but
         # this assert tests that the algorithm remains consistent.
         keys.AUC: 0.2000,
-        keys.AUC_PR: 0.7833,
+        keys.AUC_PR: 0.5833,
     }
 
     # Assert spec contains expected tensors.
@@ -1095,7 +1095,7 @@ class MultiLabelHead(test.TestCase):
         # auc and auc_pr cannot be reliably calculated for only 4 samples, but
         # this assert tests that the algorithm remains consistent.
         keys.AUC: 0.4977,
-        keys.AUC_PR: 0.6645,
+        keys.AUC_PR: 0.4037,
     }
     self._test_eval(
         head=head,
