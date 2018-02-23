@@ -31,6 +31,7 @@ TfLiteRegistration* Register_CONV_2D();
 TfLiteRegistration* Register_DEPTHWISE_CONV_2D();
 TfLiteRegistration* Register_SVDF();
 TfLiteRegistration* Register_RNN();
+TfLiteRegistration* Register_BIDIRECTIONAL_SEQUENCE_RNN();
 TfLiteRegistration* Register_UNIDIRECTIONAL_SEQUENCE_RNN();
 TfLiteRegistration* Register_EMBEDDING_LOOKUP();
 TfLiteRegistration* Register_EMBEDDING_LOOKUP_SPARSE();
@@ -57,8 +58,11 @@ TfLiteRegistration* Register_SPACE_TO_DEPTH();
 TfLiteRegistration* Register_GATHER();
 TfLiteRegistration* Register_TRANSPOSE();
 TfLiteRegistration* Register_MEAN();
+TfLiteRegistration* Register_SPLIT();
 TfLiteRegistration* Register_SQUEEZE();
 TfLiteRegistration* Register_STRIDED_SLICE();
+TfLiteRegistration* Register_EXP();
+TfLiteRegistration* Register_TOPK_V2();
 
 BuiltinOpResolver::BuiltinOpResolver() {
   AddBuiltin(BuiltinOperator_RELU, Register_RELU());
@@ -73,6 +77,8 @@ BuiltinOpResolver::BuiltinOpResolver() {
   AddBuiltin(BuiltinOperator_DEPTHWISE_CONV_2D, Register_DEPTHWISE_CONV_2D());
   AddBuiltin(BuiltinOperator_SVDF, Register_SVDF());
   AddBuiltin(BuiltinOperator_RNN, Register_RNN());
+  AddBuiltin(BuiltinOperator_BIDIRECTIONAL_SEQUENCE_RNN,
+             Register_BIDIRECTIONAL_SEQUENCE_RNN());
   AddBuiltin(BuiltinOperator_UNIDIRECTIONAL_SEQUENCE_RNN,
              Register_UNIDIRECTIONAL_SEQUENCE_RNN());
   AddBuiltin(BuiltinOperator_EMBEDDING_LOOKUP, Register_EMBEDDING_LOOKUP());
@@ -103,8 +109,11 @@ BuiltinOpResolver::BuiltinOpResolver() {
   AddBuiltin(BuiltinOperator_MEAN, Register_MEAN());
   AddBuiltin(BuiltinOperator_DIV, Register_DIV());
   AddBuiltin(BuiltinOperator_SUB, Register_SUB());
+  AddBuiltin(BuiltinOperator_SPLIT, Register_SPLIT());
   AddBuiltin(BuiltinOperator_SQUEEZE, Register_SQUEEZE());
   AddBuiltin(BuiltinOperator_STRIDED_SLICE, Register_STRIDED_SLICE());
+  AddBuiltin(BuiltinOperator_EXP, Register_EXP());
+  AddBuiltin(BuiltinOperator_TOPK_V2, Register_TOPK_V2());
 }
 
 TfLiteRegistration* BuiltinOpResolver::FindOp(

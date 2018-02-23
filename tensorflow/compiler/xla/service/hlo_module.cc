@@ -38,12 +38,16 @@ HloModule::HloModule(const string& name,
     : name_(NameUniquer::GetSanitizedName(name)),
       config_(config),
       has_entry_computation_handle_(true),
-      entry_computation_handle_(entry_computation_handle) {}
+      entry_computation_handle_(entry_computation_handle),
+      unique_id_(next_unique_module_id_++) {}
 
 HloModule::HloModule(const string& name)
-    : name_(NameUniquer::GetSanitizedName(name)) {}
+    : name_(NameUniquer::GetSanitizedName(name)),
+      unique_id_(next_unique_module_id_++) {}
 HloModule::HloModule(const string& name, const HloModuleConfig& config)
-    : name_(NameUniquer::GetSanitizedName(name)), config_(config) {}
+    : name_(NameUniquer::GetSanitizedName(name)),
+      config_(config),
+      unique_id_(next_unique_module_id_++) {}
 
 HloComputation* HloModule::AddComputationInternal(
     std::unique_ptr<HloComputation> computation, bool is_entry,
@@ -138,6 +142,21 @@ void HloModule::ReplaceComputations(
               replacements, instruction->while_body(), nullptr);
           if (new_body != nullptr) {
             instruction->set_while_body(new_body);
+          }
+          break;
+        }
+        case HloOpcode::kConditional: {
+          HloComputation* new_true_computation =
+              tensorflow::gtl::FindWithDefault(
+                  replacements, instruction->true_computation(), nullptr);
+          if (new_true_computation != nullptr) {
+            instruction->set_true_computation(new_true_computation);
+          }
+          HloComputation* new_false_computation =
+              tensorflow::gtl::FindWithDefault(
+                  replacements, instruction->false_computation(), nullptr);
+          if (new_false_computation != nullptr) {
+            instruction->set_false_computation(new_false_computation);
           }
           break;
         }
@@ -559,9 +578,23 @@ std::unique_ptr<HloModule> HloModule::Clone(const string& suffix) const {
   return module;
 }
 
+HloComputation* HloModule::DeepCloneComputation(HloComputation* computation) {
+  HloComputation* clone = AddEmbeddedComputation(computation->Clone("", this));
+  TF_CHECK_OK(
+      clone->root_instruction()->Accept([this](HloInstruction* instruction) {
+        instruction->ReplaceCalledComputations([this](HloComputation* callee) {
+          return DeepCloneComputation(callee);
+        });
+        return Status::OK();
+      }));
+  return clone;
+}
+
 uint64 HloModule::RandomNew64() const {
   tensorflow::mutex_lock l(rng_mutex_);
   return rng_();
 }
+
+/* static */ std::atomic<int> HloModule::next_unique_module_id_(0);
 
 }  // namespace xla
