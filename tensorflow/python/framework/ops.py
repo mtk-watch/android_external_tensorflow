@@ -1618,7 +1618,7 @@ class Operation(object):
           for i, x in zip(inputs, input_types)):
         raise TypeError("In op '%s', input types (%s) are not compatible "
                         "with expected types (%s)" %
-                        (self.node_def.name, [i.dtype for i in inputs],
+                        (node_def.name, [i.dtype for i in inputs],
                          input_types))
 
     # Build the list of control inputs.
@@ -1657,7 +1657,7 @@ class Operation(object):
       self._c_op = c_op
     elif self._graph._c_graph:  # pylint: disable=protected-access
       if op_def is None:
-        op_def = self._graph._registered_ops[node_def.op]
+        op_def = self._graph._get_op_def(node_def.op)
       # TODO(skyewm): op_def_library.apply_op() flattens the incoming inputs.
       # Refactor so we don't have to do this here.
       grouped_inputs = self._reconstruct_sequence_inputs(
@@ -2103,6 +2103,10 @@ class Operation(object):
     logging.warning("Operation._control_inputs is private, use "
                     "Operation.control_inputs instead. "
                     "Operation._control_inputs will eventually be removed.")
+    # Copy value because it may be self._control_inputs_val (in particular if
+    # this is called from self._control_inputs += ...), and we don't want to
+    # clear value below.
+    value = copy.copy(value)
     self._remove_all_control_inputs()
     self._add_control_inputs(value)
 
@@ -2160,16 +2164,7 @@ class Operation(object):
     """
     # pylint: enable=line-too-long
     if self._c_op:
-      with c_api_util.tf_buffer() as buf:
-        with errors.raise_exception_on_not_ok_status() as status:
-          # pylint: disable=protected-access
-          c_api.TF_GraphGetOpDef(self._graph._c_graph,
-                                 compat.as_bytes(self.type), buf, status)
-          # pylint: enable=protected-access
-        data = c_api.TF_GetBuffer(buf)
-      op_def = op_def_pb2.OpDef()
-      op_def.ParseFromString(compat.as_bytes(data))
-      return op_def
+      return self._graph._get_op_def(self.type)
     else:
       return self._op_def_val
 
@@ -2756,15 +2751,12 @@ class Graph(object):
     self._handle_movers = {}
     # A map from tensor handle to its delete op.
     self._handle_deleters = {}
-    # Resource container.
-    if context.in_graph_mode():
-      self._container_prefix = ""
-    else:
-      # In Eager mode, isolate resources (particularly ResourceVariables) in
-      # Graphs by default. This prevents unintended variable sharing. Graph mode
-      # gets this kind of isolation from Sessions.
-      self._container_prefix = "eager-execution-%d/" % (uid(),)
-    self._container = self._container_prefix
+    # Allow optimizers and other objects to pseudo-uniquely key graphs (this key
+    # will be shared when defining function graphs, for example, so optimizers
+    # being called inside function definitions behave as if they were seeing the
+    # actual outside graph).
+    self._graph_key = "grap-key-%d/" % (uid(),)
+    self._container = ""
     self._registered_ops = op_def_registry.get_registered_ops()
 
     # TODO(skyewm): fold as much of the above as possible into the C
@@ -3376,8 +3368,8 @@ class Graph(object):
     # (2) "is_stateful" is set in OpDef
     # (3) "container" attribute is in OpDef
     # (4) "container" attribute is None
-    if (self._container and op.type in self._registered_ops and
-        self._registered_ops[op.type].is_stateful):
+    # TODO(skyewm): remove op.op_def check when _USE_C_API is removed.
+    if self._container and op.op_def and op.op_def.is_stateful:
       try:
         container_attr = op.get_attr("container")
       except ValueError:
@@ -3656,6 +3648,22 @@ class Graph(object):
   @property
   def _last_id(self):
     return self._next_id_counter
+
+  def _get_op_def(self, type):  # pylint: disable=redefined-builtin
+    """Returns the `OpDef` proto for `type`. `type` is a string."""
+    if self._c_graph:
+      with c_api_util.tf_buffer() as buf:
+        with errors.raise_exception_on_not_ok_status() as status:
+          # pylint: disable=protected-access
+          c_api.TF_GraphGetOpDef(self._c_graph,
+                                 compat.as_bytes(type), buf, status)
+          # pylint: enable=protected-access
+        data = c_api.TF_GetBuffer(buf)
+      op_def = op_def_pb2.OpDef()
+      op_def.ParseFromString(compat.as_bytes(data))
+      return op_def
+    else:
+      return self._registered_ops[type]
 
   def as_default(self):
     """Returns a context manager that makes this `Graph` the default graph.
@@ -4225,7 +4233,7 @@ class Graph(object):
     """
     original_container = self._container
     try:
-      self._container = self._container_prefix + container_name
+      self._container = container_name
       yield self._container
     finally:
       self._container = original_container
@@ -5004,9 +5012,22 @@ def init_scope():
   """
   # pylint: enable=g-doc-return-or-yield,line-too-long
 
+  in_graph_mode = context.in_graph_mode()
+  # Retrieve the active name scope: entering an `init_scope` preserves
+  # the name scope of the current context.
+  if in_graph_mode:
+    default_graph = get_default_graph()
+    scope = default_graph.get_name_scope()
+  else:
+    scope = context.context().scope_name
+  if scope and scope[-1] != '/':
+    # Names that end with trailing slashes are treated by `name_scope` as
+    # absolute.
+    scope = scope + '/'
+
   outer_context = None
-  if context.in_graph_mode() and not _default_graph_stack.stack:
-    outer_context = get_default_graph().as_default
+  if in_graph_mode and not _default_graph_stack.stack:
+    outer_context = default_graph.as_default
   else:
     for stack_entry in reversed(context.context_stack.stack):
       if not stack_entry.is_building_function:
@@ -5018,7 +5039,8 @@ def init_scope():
                          "eager context was previously active.")
 
   try:
-    with outer_context(), control_dependencies(None), tape.stop_recording():
+    with outer_context(), name_scope(scope), control_dependencies(
+        None), tape.stop_recording():
       yield
   finally:
     pass
@@ -5515,6 +5537,9 @@ def get_all_collection_keys():
   return get_default_graph().get_all_collection_keys()
 
 
+name_scope_cache = {}
+
+
 # Named like a function for backwards compatibility with the
 # @tf_contextlib.contextmanager version, which was switched to a class to avoid
 # some object creation overhead.
@@ -5574,7 +5599,11 @@ class name_scope(object):  # pylint: disable=invalid-name
       if not self._name:
         scope_name = ""
       else:
-        if self._name[-1] == "/":
+        cache_key = self._name, self._old_name, self._default_name
+        if cache_key in name_scope_cache:
+          self._ctx.scope_name = name_scope_cache[cache_key]
+          return self._ctx.scope_name
+        elif self._name[-1] == "/":
           # A trailing slash breaks out of nested name scopes, indicating a
           # fully specified scope name, for compatibility with Graph.name_scope.
           scope_name = self._name
@@ -5583,6 +5612,7 @@ class name_scope(object):  # pylint: disable=invalid-name
           scope_name = (
               self._old_name + name_with_trailing_slash
               if self._old_name else name_with_trailing_slash)
+        name_scope_cache[cache_key] = scope_name
       self._ctx.scope_name = scope_name
       return scope_name
     else:

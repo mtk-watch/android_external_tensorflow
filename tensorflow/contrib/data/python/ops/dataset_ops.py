@@ -475,7 +475,6 @@ class Dataset(dataset_ops.Dataset):
 
   @deprecation.deprecated_args(
       None,
-      "Replace `num_threads=T` with `num_parallel_calls=T`. Replace "
       "`output_buffer_size=N` with `ds.prefetch(N)` on the returned dataset.",
       "num_threads", "output_buffer_size")
   def map(self,
@@ -483,7 +482,7 @@ class Dataset(dataset_ops.Dataset):
           num_threads=None,
           output_buffer_size=None,
           num_parallel_calls=None):
-    """Maps `map_func` across this datset.
+    """Maps `map_func` across this dataset.
 
     Args:
       map_func: A function mapping a nested structure of tensors (having

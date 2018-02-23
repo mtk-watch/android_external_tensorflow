@@ -32,12 +32,12 @@ from tensorflow.python.ops import array_ops
 from tensorflow.python.ops import clip_ops
 from tensorflow.python.ops import init_ops
 from tensorflow.python.ops import math_ops
+from tensorflow.python.ops import nn_impl  # pylint: disable=unused-import
 from tensorflow.python.ops import nn_ops
+from tensorflow.python.ops import partitioned_variables  # pylint: disable=unused-import
 from tensorflow.python.ops import random_ops
 from tensorflow.python.ops import rnn_cell_impl
 from tensorflow.python.ops import variable_scope as vs
-from tensorflow.python.ops import partitioned_variables
-from tensorflow.python.ops import nn_impl
 from tensorflow.python.platform import tf_logging as logging
 from tensorflow.python.util import nest
 
@@ -424,8 +424,9 @@ class TimeFreqLSTMCell(rnn_cell_impl.RNNCell):
           "W_O_diag", shape=[self._num_units], dtype=dtype)
 
     # initialize the first freq state to be zero
-    m_prev_freq = array_ops.zeros([int(inputs.get_shape()[0]), self._num_units],
-                                  dtype)
+    m_prev_freq = array_ops.zeros(
+        [inputs.shape[0].value or inputs.get_shape()[0], self._num_units],
+        dtype)
     for fq in range(len(freq_inputs)):
       c_prev = array_ops.slice(state, [0, 2 * fq * self._num_units],
                                [-1, self._num_units])
@@ -2285,7 +2286,7 @@ class GLSTMCell(rnn_cell_impl.RNNCell):
     else:
       self._state_size = rnn_cell_impl.LSTMStateTuple(num_units, num_units)
       self._output_size = num_units
-    self._linear1 = None
+    self._linear1 = [None] * number_of_groups
     self._linear2 = None
 
   @property
@@ -2359,9 +2360,11 @@ class GLSTMCell(rnn_cell_impl.RNNCell):
                                             self._group_shape[0])
               ],
               axis=1)
-          if self._linear1 is None:
-            self._linear1 = _Linear(x_g_id, 4 * self._group_shape[1], False)
-          R_k = self._linear1(x_g_id)  # pylint: disable=invalid-name
+          linear = self._linear1[group_id]
+          if linear is None:
+            linear = _Linear(x_g_id, 4 * self._group_shape[1], False)
+            self._linear1[group_id] = linear
+          R_k = linear(x_g_id)  # pylint: disable=invalid-name
           i_k, j_k, f_k, o_k = array_ops.split(R_k, 4, 1)
 
         i_parts.append(i_k)
@@ -2680,7 +2683,7 @@ class LayerNormLSTMCell(rnn_cell_impl.RNNCell):
     return m, new_state
 
 
-class SRUCell(rnn_cell_impl._LayerRNNCell):
+class SRUCell(rnn_cell_impl.LayerRNNCell):
   """SRU, Simple Recurrent Unit
 
      Implementation based on
@@ -2729,25 +2732,9 @@ class SRUCell(rnn_cell_impl._LayerRNNCell):
 
     input_depth = inputs_shape[1].value
 
-    # Here the contributor believes that the following constraints
-    # are implied. The reasoning is explained here with reference to
-    # the paper https://arxiv.org/pdf/1709.02755.pdf upon which this
-    # implementation is based.
-    # In section 2.1 Equation 5, specifically:
-    # h_t = r_t \odot g(c_t) + (1 - r_t) \odot x_t
-    # the pointwise operation between r_t and x_t means they have
-    # the same shape (since we are implementing an RNN cell, braodcasting
-    # does not happen to input of a single timestep); by the same
-    # reasons, x_t has the same shape as h_t, essentially mandating that
-    # input_depth = unit_num.
-    if input_depth != self._num_units:
-      raise ValueError("SRU requires input_depth == num_units, got "
-                       "input_depth = %s, num_units = %s" % (input_depth,
-                                                             self._num_units))
-
     self._kernel = self.add_variable(
         rnn_cell_impl._WEIGHTS_VARIABLE_NAME,
-        shape=[input_depth, 3 * self._num_units])
+        shape=[input_depth, 4 * self._num_units])
 
     self._bias = self.add_variable(
         rnn_cell_impl._BIAS_VARIABLE_NAME,
@@ -2760,8 +2747,8 @@ class SRUCell(rnn_cell_impl._LayerRNNCell):
     """Simple recurrent unit (SRU) with num_units cells."""
 
     U = math_ops.matmul(inputs, self._kernel)
-    x_bar, f_intermediate, r_intermediate = array_ops.split(
-        value=U, num_or_size_splits=3, axis=1)
+    x_bar, f_intermediate, r_intermediate, x_tx = array_ops.split(
+        value=U, num_or_size_splits=4, axis=1)
 
     f_r = math_ops.sigmoid(
         nn_ops.bias_add(
@@ -2769,7 +2756,7 @@ class SRUCell(rnn_cell_impl._LayerRNNCell):
     f, r = array_ops.split(value=f_r, num_or_size_splits=2, axis=1)
 
     c = f * state + (1.0 - f) * x_bar
-    h = r * self._activation(c) + (1.0 - r) * inputs
+    h = r * self._activation(c) + (1.0 - r) * x_tx
 
     return h, c
 
