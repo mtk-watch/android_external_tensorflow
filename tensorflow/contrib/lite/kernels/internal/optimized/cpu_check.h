@@ -29,17 +29,13 @@ inline bool TestCPUFeatureNeon() {
 #endif
 }
 
-#elif __ARM_NEON
+#elif defined USE_NEON || defined __ARM_NEON
 
-inline bool TestCPUFeatureNeon() {
-  return true;
-}
+inline bool TestCPUFeatureNeon() { return true; }
 
 #else
 
-inline bool TestCPUFeatureNeon() {
-  return false;
-}
+inline bool TestCPUFeatureNeon() { return false; }
 
 #endif
 

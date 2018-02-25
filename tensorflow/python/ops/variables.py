@@ -28,6 +28,8 @@ from tensorflow.python.ops import control_flow_ops
 from tensorflow.python.ops import gen_array_ops
 from tensorflow.python.ops import math_ops
 from tensorflow.python.ops import state_ops
+from tensorflow.python.platform import tf_logging as logging
+from tensorflow.python.training import checkpointable
 from tensorflow.python.util import compat
 from tensorflow.python.util import tf_should_use
 from tensorflow.python.util.deprecation import deprecated
@@ -35,7 +37,7 @@ from tensorflow.python.util.tf_export import tf_export
 
 
 @tf_export("Variable")
-class Variable(object):
+class Variable(checkpointable.CheckpointableBase):
   """See the @{$variables$Variables How To} for a high level overview.
 
   A variable maintains state in the graph across calls to `run()`. You add a
@@ -211,6 +213,7 @@ class Variable(object):
     if not context.in_graph_mode():
       raise RuntimeError("tf.Variable not supported in Eager mode. "
                          "Please use tfe.Variable instead")
+    self._in_graph_mode = context.in_graph_mode()
     if variable_def:
       # If variable_def is provided, recreates the variable from its fields.
       if initial_value:
@@ -304,9 +307,14 @@ class Variable(object):
     if constraint is not None and not callable(constraint):
       raise ValueError("The `constraint` argument must be a callable.")
 
+    if isinstance(initial_value, checkpointable.CheckpointInitialValue):
+      self._maybe_initialize_checkpointable()
+      self._update_uid = initial_value.checkpoint_position.restore_uid
+      initial_value = initial_value.wrapped_value
+
     if trainable and ops.GraphKeys.TRAINABLE_VARIABLES not in collections:
       collections = list(collections) + [ops.GraphKeys.TRAINABLE_VARIABLES]
-    with ops.control_dependencies(None):
+    with ops.init_scope():
       with ops.name_scope(name, "Variable", [] if init_from_fn else
                           [initial_value]) as name:
 
@@ -377,8 +385,8 @@ class Variable(object):
         else:
           with ops.colocate_with(self._variable.op):
             self._snapshot = array_ops.identity(self._variable, name="read")
+      ops.add_to_collections(collections, self)
 
-    ops.add_to_collections(collections, self)
     self._caching_device = caching_device
     self._save_slice_info = None
     self._constraint = constraint
@@ -552,7 +560,7 @@ class Variable(object):
       A `Tensor` holding the value of this variable after its initializer
       has run.
     """
-    with ops.control_dependencies(None):
+    with ops.init_scope():
       return control_flow_ops.cond(is_variable_initialized(self),
                                    self.read_value,
                                    lambda: self.initial_value)
@@ -783,6 +791,20 @@ class Variable(object):
       pass
 
     setattr(Variable, operator, _run_op)
+
+  def _scatter_tensors_from_checkpoint(self, attributes):
+    """For implementing `Checkpointable`. Return an assignment op to run."""
+    if (len(attributes) != 1
+        or checkpointable.VARIABLE_VALUE_KEY not in attributes):
+      raise ValueError(
+          ("The variable %s was restored with unexpected values (expected one "
+           "with key %s, got %s)") % (
+               self, checkpointable.VARIABLE_VALUE_KEY, attributes))
+    return self.assign(attributes[checkpointable.VARIABLE_VALUE_KEY])
+
+  def _gather_tensors_for_checkpoint(self):
+    """For implementing `Checkpointable`. This object is saveable on its own."""
+    return {checkpointable.VARIABLE_VALUE_KEY: self}
 
   def _try_guard_against_uninitialized_dependencies(self, initial_value):
     """Attempt to guard against dependencies on uninitialized variables.
@@ -1020,6 +1042,61 @@ class Variable(object):
     """Returns a `Variable` object created from `variable_def`."""
     return Variable(variable_def=variable_def,
                     import_scope=import_scope)
+
+  def __iadd__(self, other):
+    logging.log_first_n(
+        logging.WARN,
+        "Variable += will be deprecated. Use variable.assign_add"
+        " if you want assignment to the variable value or 'x = x + y'"
+        " if you want a new python Tensor object.", 1)
+    return self + other
+
+  def __isub__(self, other):
+    logging.log_first_n(
+        logging.WARN,
+        "Variable -= will be deprecated. Use variable.assign_sub"
+        " if you want assignment to the variable value or 'x = x - y'"
+        " if you want a new python Tensor object.", 1)
+    return self - other
+
+  def __imul__(self, other):
+    logging.log_first_n(
+        logging.WARN,
+        "Variable *= will be deprecated. Use variable.assign_mul"
+        " if you want assignment to the variable value or 'x = x * y'"
+        " if you want a new python Tensor object.", 1)
+    return self * other
+
+  def __idiv__(self, other):
+    logging.log_first_n(
+        logging.WARN,
+        "Variable /= will be deprecated. Use variable.assign_div"
+        " if you want assignment to the variable value or 'x = x / y'"
+        " if you want a new python Tensor object.", 1)
+    return self / other
+
+  def __itruediv__(self, other):
+    logging.log_first_n(
+        logging.WARN,
+        "Variable /= will be deprecated. Use variable.assign_div"
+        " if you want assignment to the variable value or 'x = x / y'"
+        " if you want a new python Tensor object.", 1)
+    return self / other
+
+  def __irealdiv__(self, other):
+    logging.log_first_n(
+        logging.WARN,
+        "Variable /= will be deprecated. Use variable.assign_div"
+        " if you want assignment to the variable value or 'x = x / y'"
+        " if you want a new python Tensor object.", 1)
+    return self / other
+
+  def __ipow__(self, other):
+    logging.log_first_n(
+        logging.WARN,
+        "Variable **= will be deprecated. Use 'x = x ** y'"
+        " if you want a new python Tensor object.", 1)
+    return self ** other
 
   class SaveSliceInfo(object):
     """Information on how to save this Variable as a slice.

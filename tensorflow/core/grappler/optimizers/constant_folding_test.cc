@@ -20,30 +20,15 @@ limitations under the License.
 #include "tensorflow/core/framework/tensor_testutil.h"
 #include "tensorflow/core/grappler/grappler_item.h"
 #include "tensorflow/core/grappler/utils.h"
+#include "tensorflow/core/grappler/utils/grappler_test.h"
 #include "tensorflow/core/lib/core/status_test_util.h"
 #include "tensorflow/core/lib/strings/strcat.h"
-#include "tensorflow/core/platform/test.h"
-#include "tensorflow/core/public/session.h"
 
 namespace tensorflow {
 namespace grappler {
 namespace {
 
-class ConstantFoldingTest : public ::testing::Test {
- protected:
-  std::vector<Tensor> EvaluateNodes(const GraphDef& graph,
-                                    const std::vector<string>& fetch) {
-    SessionOptions options;
-    std::unique_ptr<tensorflow::Session> session(NewSession(options));
-    TF_CHECK_OK(session->Create(graph));
-    RunOptions run_options;
-    std::vector<Tensor> output_tensors;
-    TF_CHECK_OK(
-        session->Run(run_options, {}, fetch, fetch, &output_tensors, nullptr));
-    TF_CHECK_OK(session->Close());
-    return output_tensors;
-  }
-};
+class ConstantFoldingTest : public GrapplerTest {};
 
 TEST_F(ConstantFoldingTest, SimpleFolding) {
   // Build a simple graph with a few trivially prunable ops.
@@ -210,8 +195,7 @@ TEST_F(ConstantFoldingTest, NeutralElement) {
     TF_CHECK_OK(s.ToGraphDef(&item.graph));
     item.fetch = {"addn", "matmul3", "matmul4"};
 
-    ConstantFolding optimizer(RewriterConfig::AGGRESSIVE,
-                              nullptr /* cpu_device */);
+    ConstantFolding optimizer(nullptr /* cpu_device */);
     GraphDef output;
     Status status = optimizer.Optimize(nullptr, item, &output);
     TF_EXPECT_OK(status);
@@ -229,11 +213,11 @@ TEST_F(ConstantFoldingTest, NeutralElement) {
         EXPECT_EQ("^zeros", node.input(0));
         EXPECT_EQ("^y", node.input(1));
       } else if (name == "mul3") {
-        EXPECT_EQ("Identity", node.op());
+        EXPECT_EQ("Snapshot", node.op());
         EXPECT_EQ("x", node.input(0));
         EXPECT_EQ("^ones", node.input(1));
       } else if (name == "mul4") {
-        EXPECT_EQ("Identity", node.op());
+        EXPECT_EQ("Snapshot", node.op());
         EXPECT_EQ("y", node.input(0));
         EXPECT_EQ("^ones", node.input(1));
       } else if (name == "mul5") {
@@ -245,7 +229,7 @@ TEST_F(ConstantFoldingTest, NeutralElement) {
         EXPECT_EQ("^zeros_1d", node.input(0));
         EXPECT_EQ("^y", node.input(1));
       } else if (name == "div1") {
-        EXPECT_EQ("Identity", node.op());
+        EXPECT_EQ("Snapshot", node.op());
         EXPECT_EQ("x", node.input(0));
         EXPECT_EQ("^ones", node.input(1));
       } else if (name == "div2") {
@@ -281,15 +265,15 @@ TEST_F(ConstantFoldingTest, NeutralElement) {
         EXPECT_EQ(2, t.tensor_shape().dim(0).size());
         EXPECT_EQ(3, t.tensor_shape().dim(1).size());
       } else if (name == "add1") {
-        EXPECT_EQ("Identity", node.op());
+        EXPECT_EQ("Snapshot", node.op());
         EXPECT_EQ("x", node.input(0));
         EXPECT_EQ("^zeros", node.input(1));
       } else if (name == "add2") {
-        EXPECT_EQ("Identity", node.op());
+        EXPECT_EQ("Snapshot", node.op());
         EXPECT_EQ("y", node.input(0));
         EXPECT_EQ("^zeros", node.input(1));
       } else if (name == "bias_add1") {
-        EXPECT_EQ("Identity", node.op());
+        EXPECT_EQ("Snapshot", node.op());
         EXPECT_EQ("x", node.input(0));
         EXPECT_EQ("^zeros_1d", node.input(1));
       } else if (name == "bias_add2") {
@@ -298,7 +282,7 @@ TEST_F(ConstantFoldingTest, NeutralElement) {
         EXPECT_EQ("zeros", node.input(0));
         EXPECT_EQ("bias", node.input(1));
       } else if (name == "sub1") {
-        EXPECT_EQ("Identity", node.op());
+        EXPECT_EQ("Snapshot", node.op());
         EXPECT_EQ("x", node.input(0));
         EXPECT_EQ("^zeros", node.input(1));
       } else if (name == "sub2") {
@@ -337,8 +321,7 @@ TEST_F(ConstantFoldingTest, StrengthReduce_Reciprocal) {
   GrapplerItem item;
   TF_CHECK_OK(s.ToGraphDef(&item.graph));
   item.fetch = {"div_f", "div_i", "realdiv"};
-  ConstantFolding optimizer(RewriterConfig::AGGRESSIVE,
-                            nullptr /* cpu_device */);
+  ConstantFolding optimizer(nullptr /* cpu_device */);
   GraphDef output;
   Status status = optimizer.Optimize(nullptr, item, &output);
   TF_EXPECT_OK(status);
@@ -428,8 +411,7 @@ TEST_F(ConstantFoldingTest, NeutralElement_PartialShape_UnknownOutputShape) {
   GrapplerItem item;
   TF_CHECK_OK(s.ToGraphDef(&item.graph));
 
-  ConstantFolding optimizer(RewriterConfig::AGGRESSIVE,
-                            nullptr /* cpu_device */);
+  ConstantFolding optimizer(nullptr /* cpu_device */);
   GraphDef output;
   Status status = optimizer.Optimize(nullptr, item, &output);
   TF_EXPECT_OK(status);
@@ -483,8 +465,7 @@ TEST_F(ConstantFoldingTest, NeutralElement_PartialShape_KnownOutputShape) {
   GrapplerItem item;
   TF_CHECK_OK(s.ToGraphDef(&item.graph));
 
-  ConstantFolding optimizer(RewriterConfig::AGGRESSIVE,
-                            nullptr /* cpu_device */);
+  ConstantFolding optimizer(nullptr /* cpu_device */);
   GraphDef output;
   Status status = optimizer.Optimize(nullptr, item, &output);
   TF_EXPECT_OK(status);
@@ -1352,7 +1333,7 @@ TEST_F(ConstantFoldingTest, MaterializeBroadcastGradientArgs) {
   GrapplerItem item;
   TF_CHECK_OK(s.ToGraphDef(&item.graph));
 
-  ConstantFolding fold(RewriterConfig::AGGRESSIVE, nullptr /* cpu_device */);
+  ConstantFolding fold(nullptr /* cpu_device */);
   GraphDef output;
   Status status = fold.Optimize(nullptr, item, &output);
   TF_EXPECT_OK(status);
@@ -1413,7 +1394,7 @@ TEST_F(ConstantFoldingTest, MaterializeReductionIndices) {
   TF_CHECK_OK(s.ToGraphDef(&item.graph));
   item.fetch.push_back("reshape");
 
-  ConstantFolding fold(RewriterConfig::AGGRESSIVE, nullptr /* cpu_device */);
+  ConstantFolding fold(nullptr /* cpu_device */);
   GraphDef output;
   Status status = fold.Optimize(nullptr, item, &output);
   TF_EXPECT_OK(status);
