@@ -91,6 +91,10 @@ uint32_t addTensorOperands(tflite::Interpreter* interpreter,
         nn_type = ANEURALNETWORKS_TENSOR_QUANT8_ASYMM;
         scale = tensor->params.scale;
         zeroPoint = tensor->params.zero_point;
+        if (scale <= 0.0f) {
+            // internal tensor, not valid for NNAPI
+            continue;
+        }
         break;
       case kTfLiteInt32:
         nn_type = ANEURALNETWORKS_TENSOR_INT32;
