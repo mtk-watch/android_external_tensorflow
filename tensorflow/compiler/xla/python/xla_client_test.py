@@ -319,7 +319,7 @@ class LocalBufferTest(LocalComputationTest):
 
   def _Execute(self, c, arguments):
     compiled_c = c.Build().CompileWithExampleArguments(arguments)
-    arg_buffers = [xla_client.LocalBuffer.from_py(arg) for arg in arguments]
+    arg_buffers = [xla_client.LocalBuffer.from_pyval(arg) for arg in arguments]
     result_buffer = compiled_c.ExecuteWithLocalBuffers(arg_buffers)
     return result_buffer.to_py()
 
@@ -350,7 +350,7 @@ class LocalBufferTest(LocalComputationTest):
     c.Add(c.ParameterFromNumpy(NumpyArrayF32(0.)), c.ConstantF32Scalar(3.14))
     arg = NumpyArrayF32(1.11)
     compiled_c = c.Build().CompileWithExampleArguments([arg])
-    arg_buffer = xla_client.LocalBuffer.from_py(arg)
+    arg_buffer = xla_client.LocalBuffer.from_pyval(arg)
     arg_buffer.delete()
     with self.assertRaises(ValueError):
       compiled_c.ExecuteWithLocalBuffers([arg_buffer])
@@ -762,6 +762,23 @@ class SingleOpTest(LocalComputationTest):
         [3, 2])
     self._ExecuteAndCompareExact(c, expected=[[4, 5], [7, 8]])
 
+  def testSliceInDim(self):
+    c = self._NewComputation()
+    c.SliceInDim(
+        c.Constant(NumpyArrayS32([[1, 2, 3], [4, 5, 6], [7, 8, 9]])),
+        start_index=1,
+        limit_index=2,
+        stride=1,
+        dimno=1)
+    self._ExecuteAndCompareExact(c, expected=[[2], [5], [8]])
+    c.SliceInDim(
+        c.Constant(NumpyArrayS32([[1, 2, 3], [4, 5, 6], [7, 8, 9]])),
+        start_index=0,
+        limit_index=3,
+        stride=2,
+        dimno=0)
+    self._ExecuteAndCompareExact(c, expected=[[1, 2, 3], [7, 8, 9]])
+
   def testDynamicSlice(self):
     c = self._NewComputation()
     c.DynamicSlice(
@@ -837,6 +854,17 @@ class SingleOpTest(LocalComputationTest):
     self.assertEqual(result.dtype, np.int32)
     self.assertTrue(np.all(lo <= result))
     self.assertTrue(np.all(result < hi))
+
+  def testIsConstant(self):
+    c = self._NewComputation()
+    a = c.ConstantS32Scalar(3)
+    b = c.ConstantS32Scalar(1)
+    x = c.ParameterFromNumpy(NumpyArrayS32(0))
+    const_expr = c.Sub(b, a)
+    non_const_expr = c.Mul(const_expr, x)
+    self.assertTrue(c.IsConstant(const_expr))
+    self.assertFalse(c.IsConstant(non_const_expr))
+    # self.assertTrue(c.IsConstant(c.Sub(c.Add(x, a), x)))  # TODO(b/77245564)
 
 
 class EmbeddedComputationsTest(LocalComputationTest):
@@ -1133,7 +1161,6 @@ class EmbeddedComputationsTest(LocalComputationTest):
           c, expected=np.sum(input_array, axis=tuple(dims)))
 
     _ReduceAndTest(0)
-    _ReduceAndTest(0)
     _ReduceAndTest(0, 1)
     _ReduceAndTest(0, 2)
     _ReduceAndTest(1, 2)
@@ -1260,7 +1287,7 @@ class EmbeddedComputationsTest(LocalComputationTest):
   def testInfeedS32Values(self):
     to_infeed = NumpyArrayS32([1, 2, 3, 4])
     c = self._NewComputation()
-    c.Infeed(xla_client.Shape.from_numpy(to_infeed[0]))
+    c.Infeed(xla_client.Shape.from_pyval(to_infeed[0]))
     compiled_c = c.Build().CompileWithExampleArguments()
     for item in to_infeed:
       xla_client.transfer_to_infeed(item)
@@ -1272,7 +1299,7 @@ class EmbeddedComputationsTest(LocalComputationTest):
   def testInfeedThenOutfeedS32(self):
     to_round_trip = NumpyArrayS32([1, 2, 3, 4])
     c = self._NewComputation()
-    x = c.Infeed(xla_client.Shape.from_numpy(to_round_trip[0]))
+    x = c.Infeed(xla_client.Shape.from_pyval(to_round_trip[0]))
     c.Outfeed(x)
 
     compiled_c = c.Build().CompileWithExampleArguments()
@@ -1282,7 +1309,7 @@ class EmbeddedComputationsTest(LocalComputationTest):
       execution.start()
       xla_client.transfer_to_infeed(want)
       got = xla_client.transfer_from_outfeed(
-          xla_client.Shape.from_numpy(to_round_trip[0]))
+          xla_client.Shape.from_pyval(to_round_trip[0]))
       execution.join()
       self.assertEqual(want, got)
 
