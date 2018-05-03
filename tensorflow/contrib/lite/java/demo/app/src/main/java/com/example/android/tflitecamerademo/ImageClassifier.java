@@ -19,10 +19,11 @@ import android.app.Activity;
 import android.content.res.AssetFileDescriptor;
 import android.graphics.Bitmap;
 import android.os.SystemClock;
+import android.text.SpannableString;
+import android.text.SpannableStringBuilder;
+import android.text.style.ForegroundColorSpan;
+import android.text.style.RelativeSizeSpan;
 import android.util.Log;
-
-import org.tensorflow.lite.Interpreter;
-
 import java.io.BufferedReader;
 import java.io.FileInputStream;
 import java.io.IOException;
@@ -37,11 +38,15 @@ import java.util.Comparator;
 import java.util.List;
 import java.util.Map;
 import java.util.PriorityQueue;
+import org.tensorflow.lite.Interpreter;
 
 /**
  * Classifies images with Tensorflow Lite.
  */
 public abstract class ImageClassifier {
+  // Display preferences
+  private static final float GOOD_PROB_THRESHOLD = 0.3f;
+  private static final int SMALL_COLOR = 0xffddaa88;
 
   /** Tag for the {@link Log}. */
   private static final String TAG = "TfLiteCameraDemo";
@@ -88,18 +93,23 @@ public abstract class ImageClassifier {
     labelList = loadLabelList(activity);
     imgData =
         ByteBuffer.allocateDirect(
-                DIM_BATCH_SIZE * getImageSizeX() * getImageSizeY() * DIM_PIXEL_SIZE *
-                        getNumBytesPerChannel());
+            DIM_BATCH_SIZE
+                * getImageSizeX()
+                * getImageSizeY()
+                * DIM_PIXEL_SIZE
+                * getNumBytesPerChannel());
     imgData.order(ByteOrder.nativeOrder());
     filterLabelProbArray = new float[FILTER_STAGES][getNumLabels()];
     Log.d(TAG, "Created a Tensorflow Lite Image Classifier.");
   }
 
   /** Classifies a frame from the preview stream. */
-  String classifyFrame(Bitmap bitmap) {
+  void classifyFrame(Bitmap bitmap, SpannableStringBuilder builder) {
+    printTopKLabels(builder);
+
     if (tflite == null) {
       Log.e(TAG, "Image classifier has not been initialized; Skipped.");
-      return "Uninitialized Classifier.";
+      builder.append(new SpannableString("Uninitialized Classifier."));
     }
     convertBitmapToByteBuffer(bitmap);
     // Here's where the magic happens!!!
@@ -112,9 +122,10 @@ public abstract class ImageClassifier {
     applyFilter();
 
     // Print the results.
-    String textToShow = printTopKLabels();
-    textToShow = Long.toString(endTime - startTime) + "ms" + textToShow;
-    return textToShow;
+    long duration = endTime - startTime;
+    SpannableString span = new SpannableString(duration + " ms");
+    span.setSpan(new ForegroundColorSpan(android.graphics.Color.LTGRAY), 0, span.length(), 0);
+    builder.append(span);
   }
 
   void applyFilter() {
@@ -137,6 +148,16 @@ public abstract class ImageClassifier {
     for (int j = 0; j < numLabels; ++j) {
       setProbability(j, filterLabelProbArray[FILTER_STAGES - 1][j]);
     }
+  }
+
+  public void setUseNNAPI(Boolean nnapi) {
+    if (tflite != null)
+        tflite.setUseNNAPI(nnapi);
+  }
+
+  public void setNumThreads(int num_threads) {
+    if (tflite != null)
+        tflite.setNumThreads(num_threads);
   }
 
   /** Closes tflite to release resources. */
@@ -189,7 +210,7 @@ public abstract class ImageClassifier {
   }
 
   /** Prints top-K labels, to be shown in UI as the results. */
-  private String printTopKLabels() {
+  private void printTopKLabels(SpannableStringBuilder builder) {
     for (int i = 0; i < getNumLabels(); ++i) {
       sortedLabels.add(
           new AbstractMap.SimpleEntry<>(labelList.get(i), getNormalizedProbability(i)));
@@ -197,55 +218,75 @@ public abstract class ImageClassifier {
         sortedLabels.poll();
       }
     }
-    String textToShow = "";
+
     final int size = sortedLabels.size();
-    for (int i = 0; i < size; ++i) {
+    for (int i = 0; i < size; i++) {
       Map.Entry<String, Float> label = sortedLabels.poll();
-      textToShow = String.format("\n%s: %4.2f", label.getKey(), label.getValue()) + textToShow;
+      SpannableString span =
+          new SpannableString(String.format("%s: %4.2f\n", label.getKey(), label.getValue()));
+      int color;
+      // Make it white when probability larger than threshold.
+      if (label.getValue() > GOOD_PROB_THRESHOLD) {
+        color = android.graphics.Color.WHITE;
+      } else {
+        color = SMALL_COLOR;
+      }
+      // Make first item bigger.
+      if (i == size - 1) {
+        float sizeScale = (i == size - 1) ? 1.25f : 0.8f;
+        span.setSpan(new RelativeSizeSpan(sizeScale), 0, span.length(), 0);
+      }
+      span.setSpan(new ForegroundColorSpan(color), 0, span.length(), 0);
+      builder.insert(0, span);
     }
-    return textToShow;
   }
 
   /**
    * Get the name of the model file stored in Assets.
+   *
    * @return
    */
   protected abstract String getModelPath();
 
   /**
    * Get the name of the label file stored in Assets.
+   *
    * @return
    */
   protected abstract String getLabelPath();
 
   /**
    * Get the image size along the x axis.
+   *
    * @return
    */
   protected abstract int getImageSizeX();
 
   /**
    * Get the image size along the y axis.
+   *
    * @return
    */
   protected abstract int getImageSizeY();
 
   /**
    * Get the number of bytes that is used to store a single color channel value.
+   *
    * @return
    */
   protected abstract int getNumBytesPerChannel();
 
   /**
    * Add pixelValue to byteBuffer.
+   *
    * @param pixelValue
    */
   protected abstract void addPixelValue(int pixelValue);
 
   /**
-   * Read the probability value for the specified label
-   * This is either the original value as it was read from the net's output or the updated value
-   * after the filter was applied.
+   * Read the probability value for the specified label This is either the original value as it was
+   * read from the net's output or the updated value after the filter was applied.
+   *
    * @param labelIndex
    * @return
    */
@@ -253,29 +294,32 @@ public abstract class ImageClassifier {
 
   /**
    * Set the probability value for the specified label.
+   *
    * @param labelIndex
    * @param value
    */
   protected abstract void setProbability(int labelIndex, Number value);
 
   /**
-   * Get the normalized probability value for the specified label.
-   * This is the final value as it will be shown to the user.
+   * Get the normalized probability value for the specified label. This is the final value as it
+   * will be shown to the user.
+   *
    * @return
    */
   protected abstract float getNormalizedProbability(int labelIndex);
 
   /**
-   * Run inference using the prepared input in {@link #imgData}.
-   * Afterwards, the result will be provided by getProbability().
+   * Run inference using the prepared input in {@link #imgData}. Afterwards, the result will be
+   * provided by getProbability().
    *
-   * This additional method is necessary, because we don't have a common base for different
+   * <p>This additional method is necessary, because we don't have a common base for different
    * primitive data types.
    */
   protected abstract void runInference();
 
   /**
    * Get the total number of labels.
+   *
    * @return
    */
   protected int getNumLabels() {
