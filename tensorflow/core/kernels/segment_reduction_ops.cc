@@ -40,7 +40,7 @@ limitations under the License.
 #include "tensorflow/core/kernels/cuda_solvers.h"
 #include "tensorflow/core/platform/cuda.h"
 
-using ::perftools::gputools::cuda::ScopedActivateExecutorContext;
+using stream_executor::cuda::ScopedActivateExecutorContext;
 #endif  // GOOGLE_CUDA
 
 namespace tensorflow {
@@ -242,7 +242,7 @@ class SegmentSumGPUOp : public AsyncOpKernel {
       return;
     }
 
-    perftools::gputools::DeviceMemoryBase output_rows_device(
+    se::DeviceMemoryBase output_rows_device(
         const_cast<Tensor&>(segment_ids).template flat<Index>().data() +
         (num_indices - 1));
     ScratchSpace<Index> output_rows_host(context, 1, /* on_host */ true);
@@ -679,7 +679,12 @@ class SparseSegmentReductionOpBase : public OpKernel {
     // we need to explicitly set missing indices to the default value.
     Tensor* output = nullptr;
     OP_REQUIRES_OK(context, context->allocate_output(0, output_shape, &output));
-    if (num_indices == 0) return;
+    if (num_indices == 0) {
+      if (output_rows > 0) {
+        output->flat_outer_dims<T>().setConstant(default_value_);
+      }
+      return;
+    }
     OP_REQUIRES(context, output_rows > 0,
                 errors::InvalidArgument("segment ids must be >= 0"));
     auto output_flat = output->flat_outer_dims<T>();

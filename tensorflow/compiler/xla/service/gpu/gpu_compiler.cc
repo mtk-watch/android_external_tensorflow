@@ -33,8 +33,10 @@ limitations under the License.
 #include "tensorflow/compiler/xla/service/buffer_assignment.h"
 #include "tensorflow/compiler/xla/service/buffer_liveness.h"
 #include "tensorflow/compiler/xla/service/call_inliner.h"
+#include "tensorflow/compiler/xla/service/conditional_simplifier.h"
 #include "tensorflow/compiler/xla/service/dot_decomposer.h"
 #include "tensorflow/compiler/xla/service/flatten_call_graph.h"
+#include "tensorflow/compiler/xla/service/gather_expander.h"
 #include "tensorflow/compiler/xla/service/gpu/cudnn_batchnorm_rewriter.h"
 #include "tensorflow/compiler/xla/service/gpu/cudnn_convolution_algorithm_picker.h"
 #include "tensorflow/compiler/xla/service/gpu/cudnn_convolution_rewriter.h"
@@ -89,8 +91,6 @@ limitations under the License.
 #include "tensorflow/core/platform/tracing.h"
 #include "tensorflow/stream_executor/cuda/cuda_diagnostics.h"
 
-namespace se = ::perftools::gputools;
-
 namespace xla {
 namespace gpu {
 
@@ -100,7 +100,7 @@ namespace gpu {
 
 namespace {
 
-using tensorflow::port::Tracing;
+namespace tracing = tensorflow::tracing;
 
 // Returns the directory containing nvvm libdevice files.  config_cuda_data_dir
 // should be equal to config().debug_options().xla_gpu_cuda_data_dir() of the
@@ -164,6 +164,9 @@ tensorflow::Status OptimizeHloModule(HloModule* hlo_module,
           /*rewrite_grad_op=*/true,
           /*use_fusion=*/false);
 
+      // Rewrite gather ops into smaller ones.
+      pass.AddPass<GatherExpander>();
+
       // BatchNormExpander can create zero-sized ops, so zero-sized HLO
       // elimination has to come after that pass.
       pipeline.AddPass<ZeroSizedHloElimination>();
@@ -176,6 +179,7 @@ tensorflow::Status OptimizeHloModule(HloModule* hlo_module,
       pass.AddPass<HloDCE>();
       pass.AddPass<ReshapeMover>();
       pass.AddPass<HloConstantFolding>();
+      pass.AddPass<ConditionalSimplifier>();
     }
 
     pipeline.AddPass<TransposeFolding>(
@@ -242,6 +246,22 @@ tensorflow::Status OptimizeHloModule(HloModule* hlo_module,
   }
 
   {
+    HloPassPipeline pipeline("layout_assignment");
+    pipeline.AddPass<GpuLayoutAssignment>(
+        hlo_module->mutable_entry_computation_layout());
+
+    // The LayoutAssignment pass may leave behind kCopy instructions which are
+    // duplicate or NOPs, so remove them with algebraic simplification and CSE.
+    pipeline.AddPass<HloPassFix<AlgebraicSimplifier>>(
+        /*is_layout_sensitive=*/true,
+        /*valid_bitcast_callback=*/[](const Shape&, const Shape&) {
+          return true;
+        });
+    pipeline.AddPass<HloCSE>(/*is_layout_sensitive=*/true);
+    TF_RETURN_IF_ERROR(pipeline.Run(hlo_module).status());
+  }
+
+  {
     HloPassFix<HloPassPipeline> fusion("fusion");
     fusion.AddInvariantChecker<HloVerifier>();
     fusion.AddPass<GpuInstructionFusion>(/*may_duplicate=*/false);
@@ -277,15 +297,6 @@ tensorflow::Status PrepareHloModuleForIrEmitting(HloModule* hlo_module) {
   HloPassPipeline pipeline("GPU-ir-emit-prepare");
   pipeline.AddInvariantChecker<HloVerifier>();
 
-  pipeline.AddPass<GpuLayoutAssignment>(
-      hlo_module->mutable_entry_computation_layout());
-
-  // The LayoutAssignment pass may leave behind kCopy instructions which are
-  // duplicate or NOPs, so remove them with algebraic simplification and CSE.
-  pipeline.AddPass<HloPassFix<AlgebraicSimplifier>>(
-      /*is_layout_sensitive=*/true,
-      [](const Shape&, const Shape&) { return true; });
-  pipeline.AddPass<HloCSE>(/*is_layout_sensitive=*/true);
   // Copy insertion should be performed immediately before IR emission to avoid
   // inserting unnecessary copies (later pass adds an instruction which
   // materializes the value) or missing a necessary copy (later pass removes an
@@ -399,7 +410,7 @@ void WarnIfBadDriverJITVersion() {
 // code (i.e. a cubin) as a byte array.
 StatusOr<std::vector<uint8>> CompilePtx(const string& ptx, int cc_major,
                                         int cc_minor) {
-  Tracing::TraceMe annotation("Compile PTX", /*is_expensive=*/true);
+  tracing::ScopedActivity activity("Compile PTX", /*is_expensive=*/true);
   const string ptxas_path =
       tensorflow::io::JoinPath(tensorflow::CudaRoot(), "bin", "ptxas");
   VLOG(2) << "Using ptxas at " << ptxas_path;
@@ -470,8 +481,8 @@ StatusOr<std::unique_ptr<HloModule>> GpuCompiler::RunHloPasses(
     std::unique_ptr<HloModule> module, se::StreamExecutor* stream_exec,
     DeviceMemoryAllocator* device_allocator) {
   XLA_SCOPED_LOGGING_TIMER("GpuCompiler::RunHloPasses");
-  Tracing::TraceMe annotation("HLO Transforms", module->name(),
-                              /*is_expensive=*/true);
+  tracing::ScopedActivity activity("HLO Transforms", module->name(),
+                                   /*is_expensive=*/true);
   TF_RETURN_IF_ERROR(
       OptimizeHloModule(module.get(), stream_exec, device_allocator));
   return std::move(module);
@@ -658,6 +669,8 @@ StatusOr<std::unique_ptr<Executable>> GpuCompiler::RunBackend(
 
   if (module->config().hlo_profiling_enabled()) {
     HloCostAnalysis cost_analysis(ShapeSizeBytesFunction());
+    cost_analysis.set_bytes_per_second(
+        stream_exec->GetDeviceDescription().memory_bandwidth());
     TF_RETURN_IF_ERROR(module->entry_computation()->Accept(&cost_analysis));
     profile_index_map = MakeUnique<HloProfileIndexMap>(*module);
     profile_printer =
@@ -679,7 +692,7 @@ std::vector<uint8> GpuCompiler::CompilePtxOrGetCachedResult(const string& ptx,
                                                             int cc_major,
                                                             int cc_minor) {
   XLA_SCOPED_LOGGING_TIMER("GpuCompiler::CompilePtxOrGetCachedResult");
-  Tracing::TraceMe annotation("PTX->CUBIN", /*is_expensive=*/true);
+  tracing::ScopedActivity activity("PTX->CUBIN", /*is_expensive=*/true);
   bool inserted;
   decltype(compilation_cache_.begin()) iter;
   // Pointers into compilation_cache_ where the ptx and (optional) cubin are
@@ -764,9 +777,9 @@ se::Platform::Id GpuCompiler::PlatformId() const {
 }  // namespace xla
 
 static bool InitModule() {
-  xla::Compiler::RegisterCompilerFactory(se::cuda::kCudaPlatformId, []() {
-    return xla::MakeUnique<xla::gpu::GpuCompiler>();
-  });
+  xla::Compiler::RegisterCompilerFactory(
+      stream_executor::cuda::kCudaPlatformId,
+      []() { return xla::MakeUnique<xla::gpu::GpuCompiler>(); });
   return true;
 }
 static bool module_initialized = InitModule();
