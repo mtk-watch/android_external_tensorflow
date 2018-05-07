@@ -18,6 +18,7 @@ limitations under the License.
 #include <sys/mman.h>
 #include <sys/stat.h>
 #include <sys/types.h>
+#include <unordered_set>
 #include "tensorflow/contrib/lite/builtin_op_data.h"
 #include "tensorflow/contrib/lite/error_reporter.h"
 #include "tensorflow/contrib/lite/model.h"
@@ -72,11 +73,17 @@ NNAPIDelegate::~NNAPIDelegate() {
 // Adds the tensors of the interpreter to the NN API model.
 // Returns the number of operands added.
 uint32_t addTensorOperands(tflite::Interpreter* interpreter,
-                           ANeuralNetworksModel* nn_model) {
+                           ANeuralNetworksModel* nn_model,
+                           std::unordered_set<uint32_t>& skip_list) {
   uint32_t next_id = 0;
   for (size_t i = 0; i < interpreter->tensors_size(); i++) {
+    // skip temporaries tensors.
+    if (skip_list.count(i) > 0) {
+      continue;
+    }
     int32_t nn_type = 0;
-    float scale = 1.0f;
+    // NNAPI requires 32-bit float scale to be zero, tflite doesn't care
+    float scale = 0.0f;
     int32_t zeroPoint = 0;
     TfLiteTensor* tensor = interpreter->tensor(i);
     switch (tensor->type) {
@@ -104,11 +111,10 @@ uint32_t addTensorOperands(tflite::Interpreter* interpreter,
       default:
         FATAL("Unsupported type.");
     }
-    // TODO(aselle): Note, many of these are intermediate results. Do I need
-    // to ever specify these sizes. I am currently below doing setValue
-    // on all of them, but I shouldn't in the future.
-    // Answer(jeanluc): If all the operators can set the dimension correctly,
-    // you won't need to.
+    // We set size of all intermediate operands here.  NNAPI is able to execute
+    // a graph with unknown intermediate operand sizes but known sizes allow
+    // partitioning of the graph over different drivers. The requirement of
+    // needing to know the size may be lifted in future versions of NNAPI.
     ANeuralNetworksOperandType operand_type{
         nn_type, static_cast<uint32_t>(tensor->dims->size),
         reinterpret_cast<uint32_t*>(tensor->dims->data), scale, zeroPoint};
@@ -120,11 +126,11 @@ uint32_t addTensorOperands(tflite::Interpreter* interpreter,
       if (const NNAPIAllocation* alloc = dynamic_cast<const NNAPIAllocation*>(
               static_cast<const Allocation*>(tensor->allocation))) {
         CHECK_NN(ANeuralNetworksModel_setOperandValueFromMemory(
-            nn_model, i, alloc->memory(), alloc->offset(tensor->data.raw),
+            nn_model, next_id, alloc->memory(), alloc->offset(tensor->data.raw),
             tensor->bytes));
       } else {
         CHECK_NN(ANeuralNetworksModel_setOperandValue(
-            nn_model, i, tensor->data.raw, tensor->bytes));
+            nn_model, next_id, tensor->data.raw, tensor->bytes));
       }
     }
     ++next_id;
@@ -257,6 +263,10 @@ void AddOpsAndParams(tflite::Interpreter* interpreter,
         nn_op_type = ANEURALNETWORKS_ADD;
         add_add_params();
         break;
+      case tflite::BuiltinOperator_MUL:
+        nn_op_type = ANEURALNETWORKS_MUL;
+        add_add_params();
+        break;
       case tflite::BuiltinOperator_AVERAGE_POOL_2D:
         add_pooling_params(node.builtin_data);
         nn_op_type = ANEURALNETWORKS_AVERAGE_POOL_2D;
@@ -334,7 +344,6 @@ void AddOpsAndParams(tflite::Interpreter* interpreter,
       case tflite::BuiltinOperator_UNIDIRECTIONAL_SEQUENCE_LSTM:
       case tflite::BuiltinOperator_L2_NORMALIZATION:
       case tflite::BuiltinOperator_LOCAL_RESPONSE_NORMALIZATION:
-      case tflite::BuiltinOperator_MUL:
       case tflite::BuiltinOperator_PAD:
       case tflite::BuiltinOperator_RESIZE_BILINEAR:
       case tflite::BuiltinOperator_CALL:
@@ -385,7 +394,29 @@ TfLiteStatus NNAPIDelegate::BuildGraph(Interpreter* interpreter) {
   if (!nn_model_) {
     CHECK_NN(ANeuralNetworksModel_create(&nn_model_));
 
-    uint32_t next_id = addTensorOperands(interpreter, nn_model_);
+    // Find all the temporary (tflite's scratch) tensors and put them in a skip_list.
+    // TODO(mikie): only looks at CONV_2D operations. There may be other
+    // operations that also create unused temporaries - support for these can be
+    // added as we run into them.
+    std::unordered_set<uint32_t> skip_list;
+    for (size_t i = 0; i < interpreter->nodes_size(); i++) {
+      const auto* node_and_registration = interpreter->node_and_registration(i);
+      const TfLiteNode& node = node_and_registration->first;
+      const TfLiteRegistration& registration = node_and_registration->second;
+      tflite::BuiltinOperator builtin =
+          static_cast<tflite::BuiltinOperator>(registration.builtin_code);
+      if (builtin == tflite::BuiltinOperator_CONV_2D) {
+        int* data = reinterpret_cast<int*>(node.user_data);
+        if (data[0] > 0) {
+          skip_list.insert((uint32_t)data[0]);
+        }
+        if (data[1] > 0) {
+          skip_list.insert((uint32_t)data[1]);
+        }
+      }
+    }
+
+    uint32_t next_id = addTensorOperands(interpreter, nn_model_, skip_list);
     AddOpsAndParams(interpreter, nn_model_, next_id);
     CHECK_NN(ANeuralNetworksModel_identifyInputsAndOutputs(
         nn_model_, static_cast<uint32_t>(interpreter->inputs().size()),
