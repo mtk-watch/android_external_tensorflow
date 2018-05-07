@@ -61,6 +61,7 @@ cc_library_static {
         "kernels/maximum_minimum.cc",
         "kernels/mean.cc",
         "kernels/mul.cc",
+        "kernels/neg.cc",
         "kernels/pad.cc",
         "kernels/pooling.cc",
         "kernels/register.cc",
