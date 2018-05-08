@@ -74,13 +74,19 @@ NNAPIDelegate::~NNAPIDelegate() {
 // Returns the number of operands added.
 uint32_t addTensorOperands(tflite::Interpreter* interpreter,
                            ANeuralNetworksModel* nn_model,
-                           std::unordered_set<uint32_t>& skip_list) {
+                           const std::vector<uint32_t>& skip_list) {
   uint32_t next_id = 0;
   for (size_t i = 0; i < interpreter->tensors_size(); i++) {
     // skip temporaries tensors.
-    if (skip_list.count(i) > 0) {
-      continue;
+    bool shouldSkip = false;
+    for (auto skip_idx : skip_list) {
+      if (i == skip_idx) {
+        shouldSkip = true;
+        break;
+      }
     }
+    if (shouldSkip) continue;
+
     int32_t nn_type = 0;
     // NNAPI requires 32-bit float scale to be zero, tflite doesn't care
     float scale = 0.0f;
@@ -370,6 +376,7 @@ void AddOpsAndParams(tflite::Interpreter* interpreter,
       case tflite::BuiltinOperator_MINIMUM:
       case tflite::BuiltinOperator_ARG_MAX:
       case tflite::BuiltinOperator_LESS:
+      case tflite::BuiltinOperator_NEG:
         FATAL("Op code %d is currently not delegated to NNAPI", builtin);
         nn_op_type = -1;  // set to invalid
         break;
@@ -394,24 +401,14 @@ TfLiteStatus NNAPIDelegate::BuildGraph(Interpreter* interpreter) {
   if (!nn_model_) {
     CHECK_NN(ANeuralNetworksModel_create(&nn_model_));
 
-    // Find all the temporary (tflite's scratch) tensors and put them in a skip_list.
-    // TODO(mikie): only looks at CONV_2D operations. There may be other
-    // operations that also create unused temporaries - support for these can be
-    // added as we run into them.
-    std::unordered_set<uint32_t> skip_list;
+    // Find all the temporary tensors and put them in a skip_list.
+    std::vector<uint32_t> skip_list;
     for (size_t i = 0; i < interpreter->nodes_size(); i++) {
       const auto* node_and_registration = interpreter->node_and_registration(i);
       const TfLiteNode& node = node_and_registration->first;
-      const TfLiteRegistration& registration = node_and_registration->second;
-      tflite::BuiltinOperator builtin =
-          static_cast<tflite::BuiltinOperator>(registration.builtin_code);
-      if (builtin == tflite::BuiltinOperator_CONV_2D) {
-        int* data = reinterpret_cast<int*>(node.user_data);
-        if (data[0] > 0) {
-          skip_list.insert((uint32_t)data[0]);
-        }
-        if (data[1] > 0) {
-          skip_list.insert((uint32_t)data[1]);
+      if (node.temporaries != nullptr) {
+        for (int j = 0; j < node.temporaries->size; j++) {
+          skip_list.push_back(static_cast<uint32_t>(node.temporaries->data[j]));
         }
       }
     }

@@ -64,6 +64,7 @@ cc_library_static {
         "maximum_minimum.cc",
         "mean.cc",
         "mul.cc",
+        "neg.cc",
         "pad.cc",
         "pooling.cc",
         "register.cc",
