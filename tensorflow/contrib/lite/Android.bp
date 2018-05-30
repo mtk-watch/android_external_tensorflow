@@ -45,6 +45,7 @@ cc_library_static {
         "graph_info.cc",
         "interpreter.cc",
         "model.cc",
+        "op_resolver.cc",	
         "nnapi_delegate.cc",
         "optional_debug_tools.cc",
         "simple_memory_arena.cc",
