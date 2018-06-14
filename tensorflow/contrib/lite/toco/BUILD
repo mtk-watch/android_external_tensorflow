@@ -245,6 +245,7 @@ cc_library(
         "graph_transformations/quantization_util.cc",
         "graph_transformations/quantization_util.h",
         "graph_transformations/quantize.cc",
+        "graph_transformations/quantize_weights.cc",
         "graph_transformations/read_fake_quant_min_max.cc",
         "graph_transformations/remove_final_dequantize_op.cc",
         "graph_transformations/remove_tensorflow_assert.cc",
@@ -373,6 +374,7 @@ tf_cc_test(
         ":toco_tooling",
         "//tensorflow/core:framework",
         "//tensorflow/core:graph",
+        "//tensorflow/core:lib",
         "//tensorflow/core:protos_all_cc",
         "@com_google_googletest//:gtest_main",
     ],
@@ -410,6 +412,7 @@ tf_cc_test(
     deps = [
         ":model",
         ":tooling_util",
+        "//tensorflow/core:lib",
         "@com_google_googletest//:gtest_main",
     ],
 )

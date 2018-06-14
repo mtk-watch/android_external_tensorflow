@@ -17,6 +17,7 @@ from __future__ import absolute_import
 from __future__ import division
 from __future__ import print_function
 
+import collections
 import csv
 
 import numpy as np
@@ -25,6 +26,7 @@ from tensorflow.contrib.data.python.ops import batching
 from tensorflow.contrib.data.python.ops import gen_dataset_ops as contrib_gen_dataset_ops
 from tensorflow.contrib.data.python.ops import interleave_ops
 from tensorflow.contrib.data.python.ops import shuffle_ops
+from tensorflow.contrib.data.python.ops import stats_ops
 from tensorflow.python.data.ops import dataset_ops
 from tensorflow.python.data.ops import readers as core_readers
 from tensorflow.python.data.util import convert
@@ -467,11 +469,11 @@ def make_csv_dataset(
     Args:
       *columns: list of `Tensor`s corresponding to one csv record.
     Returns:
-      A dictionary of feature names to values for that particular record. If
+      An OrderedDict of feature names to values for that particular record. If
       label_name is provided, extracts the label feature to be returned as the
       second element of the tuple.
     """
-    features = dict(zip(column_names, columns))
+    features = collections.OrderedDict(zip(column_names, columns))
     if label_name is not None:
       label = features.pop(label_name)
       return features, label
@@ -752,6 +754,8 @@ def make_batched_features_dataset(file_pattern,
   # Apply dataset repeat and shuffle transformations.
   dataset = _maybe_shuffle_and_repeat(
       dataset, num_epochs, shuffle, shuffle_buffer_size, shuffle_seed)
+
+  dataset = dataset.apply(stats_ops.feature_stats("record_stats"))
 
   if drop_final_batch:
     dataset = dataset.apply(batching.batch_and_drop_remainder(batch_size))

@@ -107,13 +107,12 @@ def tf_workspace(path_prefix="", tf_repo_name=""):
   tf_http_archive(
       name = "eigen_archive",
       urls = [
-          "https://mirror.bazel.build/bitbucket.org/eigen/eigen/get/6913f0cf7d06.tar.gz",
-          "https://bitbucket.org/eigen/eigen/get/6913f0cf7d06.tar.gz",
+          "https://mirror.bazel.build/bitbucket.org/eigen/eigen/get/267806ed9b4f.tar.gz",
+          "https://bitbucket.org/eigen/eigen/get/267806ed9b4f.tar.gz",
       ],
-      sha256 = "791b836cacd03e20bae5bdd25f1c4a5505a0a9975ba94a61eb4e2631fbd1d53a",
-      strip_prefix = "eigen-eigen-6913f0cf7d06",
+      sha256 = "ade57357093463cab9e4e51cd5749c81483a75451b1471a3ebc73f9c1d14043b",
+      strip_prefix = "eigen-eigen-267806ed9b4f",
       build_file = clean_dep("//third_party:eigen.BUILD"),
-      patch_file = clean_dep("//third_party:eigen_fix_cuda_compilation.patch")
   )
 
   tf_http_archive(
@@ -452,11 +451,11 @@ def tf_workspace(path_prefix="", tf_repo_name=""):
   tf_http_archive(
       name = "llvm",
       urls = [
-          "https://mirror.bazel.build/github.com/llvm-mirror/llvm/archive/638915a37f90f26599941977846408864f70ab35.tar.gz",
-          "https://github.com/llvm-mirror/llvm/archive/638915a37f90f26599941977846408864f70ab35.tar.gz",
+          "https://mirror.bazel.build/github.com/llvm-mirror/llvm/archive/582e5dd5553e3089fef97f9ab5a3f063e0160fa9.tar.gz",
+          "https://github.com/llvm-mirror/llvm/archive/582e5dd5553e3089fef97f9ab5a3f063e0160fa9.tar.gz",
       ],
-      sha256 = "aae3cacefa318cef030b4ca1e81ee9906752bbd89013cf9d47e156b5ad04b3a5",
-      strip_prefix = "llvm-638915a37f90f26599941977846408864f70ab35",
+      sha256 = "9a0e63469ae5a546e0c84b778955f0febabfc8497d312324546ec7d0db68430e",
+      strip_prefix = "llvm-582e5dd5553e3089fef97f9ab5a3f063e0160fa9",
       build_file = clean_dep("//third_party/llvm:llvm.BUILD"),
   )
 
@@ -779,11 +778,9 @@ def tf_workspace(path_prefix="", tf_repo_name=""):
       actual = "@grpc//:grpc_python_plugin",
   )
 
-  # gRPC has three empty C++ functions which it wants the user to define
-  # at build time. https://github.com/grpc/grpc/issues/13590
   native.bind(
       name = "grpc_lib",
-      actual = "@grpc//:grpc++_unsecure",
+      actual = "@grpc//:grpc++",
   )
 
   # Needed by gRPC
@@ -820,7 +817,7 @@ def tf_workspace(path_prefix="", tf_repo_name=""):
   # Needed by Protobuf
   native.bind(
       name = "python_headers",
-      actual = clean_dep("//util/python:python_headers"),
+      actual = clean_dep("//third_party/python_runtime:headers"),
   )
 
   # Needed by Protobuf

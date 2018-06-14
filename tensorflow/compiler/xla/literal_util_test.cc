@@ -1431,7 +1431,7 @@ TEST_F(LiteralUtilTest, LiteralSliceOfALiteralSlice) {
   EXPECT_EQ(matrix_view, *Literal::CreateR2<float>({{1.0, 2.0}, {3.0, 4.0}}));
 }
 
-TEST_F(LiteralUtilTest, BorrowingLiteralFromOneBufferPtrTest) {
+TEST_F(LiteralUtilTest, BorrowingLiteralFromOneBufferPtr) {
   std::vector<int64> int64_values = {1, 2, 3};
   const Shape literal_shape = ShapeUtil::MakeShape(S64, {3});
 
@@ -1443,7 +1443,7 @@ TEST_F(LiteralUtilTest, BorrowingLiteralFromOneBufferPtrTest) {
   EXPECT_EQ(literal.Get<int64>({2}), 3);
 }
 
-TEST_F(LiteralUtilTest, BorrowingLiteralFromMultipleBufferPtrsTest) {
+TEST_F(LiteralUtilTest, BorrowingLiteralFromMultipleBufferPtrs) {
   std::vector<int64> one_two_three = {1, 2, 3};
   const Shape one_two_three_shape = ShapeUtil::MakeShape(S64, {3});
 
@@ -1808,6 +1808,36 @@ TEST_F(LiteralUtilTest, GetSparseElementAsString) {
           std::vector<complex64>{{1.0, 2.0}, {3.0, 4.0}, {5.0, 6.0}})
           ->GetSparseElementAsString(1),
       tensorflow::strings::StrCat("(", float{3.0}, ", ", float{4.0}, ")"));
+}
+
+TEST_F(LiteralUtilTest, BroadcastVectorToMatrix0) {
+  std::unique_ptr<Literal> literal = Literal::CreateR1<int64>({1, 2});
+  TF_ASSERT_OK_AND_ASSIGN(
+      std::unique_ptr<Literal> broadcasted_literal,
+      literal->Broadcast(
+          /*result_shape=*/ShapeUtil::MakeShape(S64, {2, 2}),
+          /*dimensions=*/{0}));
+  EXPECT_EQ(*broadcasted_literal, *Literal::CreateR2<int64>({{1, 1}, {2, 2}}));
+}
+
+TEST_F(LiteralUtilTest, BroadcastVectorToMatrix1) {
+  std::unique_ptr<Literal> literal = Literal::CreateR1<int64>({1, 2});
+  TF_ASSERT_OK_AND_ASSIGN(
+      std::unique_ptr<Literal> broadcasted_literal,
+      literal->Broadcast(
+          /*result_shape=*/ShapeUtil::MakeShape(S64, {2, 2}),
+          /*dimensions=*/{1}));
+  EXPECT_EQ(*broadcasted_literal, *Literal::CreateR2<int64>({{1, 2}, {1, 2}}));
+}
+
+TEST_F(LiteralUtilTest, BroadcastScalarToMatrix) {
+  std::unique_ptr<Literal> literal = Literal::CreateR0<int32>(9);
+  TF_ASSERT_OK_AND_ASSIGN(
+      std::unique_ptr<Literal> broadcasted_literal,
+      literal->Broadcast(
+          /*result_shape=*/ShapeUtil::MakeShape(S32, {2, 2}),
+          /*dimensions=*/{}));
+  EXPECT_EQ(*broadcasted_literal, *Literal::CreateR2<int32>({{9, 9}, {9, 9}}));
 }
 
 }  // namespace

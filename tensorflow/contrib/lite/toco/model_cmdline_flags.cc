@@ -48,7 +48,7 @@ bool ParseModelFlagsFromCommandLineFlags(
            "that information from the input file."),
       Flag("input_arrays", parsed_flags.input_arrays.bind(),
            parsed_flags.input_arrays.default_value(),
-           "Names of the output arrays, comma-separated. If not specified, "
+           "Names of the input arrays, comma-separated. If not specified, "
            "will try to read that information from the input file."),
       Flag("output_array", parsed_flags.output_array.bind(),
            parsed_flags.output_array.default_value(),
@@ -83,7 +83,7 @@ bool ParseModelFlagsFromCommandLineFlags(
            "Deprecated: use --input_data_types instead. Input array type, if "
            "not already provided in the graph. "
            "Typically needs to be specified when passing arbitrary arrays "
-           "to --input_array."),
+           "to --input_arrays."),
       Flag("input_data_types", parsed_flags.input_data_types.bind(),
            parsed_flags.input_data_types.default_value(),
            "Input arrays types, comma-separated, if not already provided in "
