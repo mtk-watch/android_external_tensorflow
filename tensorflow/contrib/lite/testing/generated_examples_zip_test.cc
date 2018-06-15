@@ -36,7 +36,12 @@ bool FLAGS_ignore_known_bugs = true;
 // TODO(b/71769302) zip_files_dir should have a more accurate default, if
 // possible
 string* FLAGS_zip_file_path = new string("./");
+#ifndef __ANDROID__
 string* FLAGS_unzip_binary_path = new string("/usr/bin/unzip");
+#else
+string* FLAGS_unzip_binary_path = new string("/system/bin/unzip");
+#endif
+bool FLAGS_use_nnapi = false;
 }  // namespace
 
 // TensorFlow system environment for file system called.
@@ -48,7 +53,7 @@ tensorflow::Env* env = tensorflow::Env::Default();
 // TODO(ahentz): make sure we clean this list up frequently.
 std::map<string, string> kBrokenTests = {
     // Add only supports float32. (and "constant" tests use Add)
-    {R"(^\/adda.*int32)", "68808744"},
+    {R"(^\/add_a.*int32)", "68808744"},
     {R"(^\/constant.*int32)", "68808744"},
     {R"(^\/mul.*int32)", "68808744"},
     {R"(^\/div.*int32)", "68808744"},
@@ -61,25 +66,25 @@ std::map<string, string> kBrokenTests = {
      "70527055"},
 
     // L2Norm only supports tensors with 4D or fewer.
-    {R"(^\/l2normdim=.*,epsilon=.*,input_shape=\[.,.,.,.,.*\])", "67963684"},
+    {R"(^\/l2norm_dim=.*,epsilon=.*,input_shape=\[.,.,.,.,.*\])", "67963684"},
 
     // SpaceToBatchND only supports 4D tensors.
     {R"(^\/space_to_batch_nd.*input_shape=\[1,4,4,4,1,1\])", "70848787"},
 
     // L2Norm only works for dim=-1.
-    {R"(^\/l2normdim=-2,epsilon=.*,input_shape=\[.,.\])", "67963812"},
-    {R"(^\/l2normdim=0,epsilon=.*,input_shape=\[.,.\])", "67963812"},
-    {R"(^\/l2normdim=-2,epsilon=.*,input_shape=\[3,15,14,3\])", "67963812"},
-    {R"(^\/l2normdim=-2,epsilon=.*,input_shape=\[1,3,4,3\])", "67963812"},
-    {R"(^\/l2normdim=2,epsilon=.*,input_shape=\[3,15,14,3\])", "67963812"},
-    {R"(^\/l2normdim=2,epsilon=.*,input_shape=\[1,3,4,3\])", "67963812"},
-    {R"(^\/l2normdim=0,epsilon=.*,input_shape=\[3,15,14,3\])", "67963812"},
-    {R"(^\/l2normdim=0,epsilon=.*,input_shape=\[1,3,4,3\])", "67963812"},
-    {R"(^\/l2normdim=1,epsilon=.*,input_shape=\[3,15,14,3\])", "67963812"},
-    {R"(^\/l2normdim=1,epsilon=.*,input_shape=\[1,3,4,3\])", "67963812"},
-    {R"(^\/l2normdim=\[2,3\],epsilon=.*,input_shape=\[3,15,14,3\])",
+    {R"(^\/l2norm_dim=-2,epsilon=.*,input_shape=\[.,.\])", "67963812"},
+    {R"(^\/l2norm_dim=0,epsilon=.*,input_shape=\[.,.\])", "67963812"},
+    {R"(^\/l2norm_dim=-2,epsilon=.*,input_shape=\[3,15,14,3\])", "67963812"},
+    {R"(^\/l2norm_dim=-2,epsilon=.*,input_shape=\[1,3,4,3\])", "67963812"},
+    {R"(^\/l2norm_dim=2,epsilon=.*,input_shape=\[3,15,14,3\])", "67963812"},
+    {R"(^\/l2norm_dim=2,epsilon=.*,input_shape=\[1,3,4,3\])", "67963812"},
+    {R"(^\/l2norm_dim=0,epsilon=.*,input_shape=\[3,15,14,3\])", "67963812"},
+    {R"(^\/l2norm_dim=0,epsilon=.*,input_shape=\[1,3,4,3\])", "67963812"},
+    {R"(^\/l2norm_dim=1,epsilon=.*,input_shape=\[3,15,14,3\])", "67963812"},
+    {R"(^\/l2norm_dim=1,epsilon=.*,input_shape=\[1,3,4,3\])", "67963812"},
+    {R"(^\/l2norm_dim=\[2,3\],epsilon=.*,input_shape=\[3,15,14,3\])",
      "67963812"},
-    {R"(^\/l2normdim=\[2,3\],epsilon=.*,input_shape=\[1,3,4,3\])", "67963812"},
+    {R"(^\/l2norm_dim=\[2,3\],epsilon=.*,input_shape=\[1,3,4,3\])", "67963812"},
 
     // ResizeBilinear looks completely incompatible with Tensorflow
     {R"(^\/resize_bilinear.*dtype=tf.int32)", "72401107"},
@@ -212,7 +217,7 @@ TEST_P(OpsTest, RunZipTests) {
 
   std::ifstream tflite_stream(tflite_test_case);
   ASSERT_TRUE(tflite_stream.is_open()) << tflite_test_case;
-  tflite::testing::TfLiteDriver test_driver(/*use_nnapi=*/true);
+  tflite::testing::TfLiteDriver test_driver(FLAGS_use_nnapi);
   test_driver.SetModelBaseDir(tflite_dir);
 
   string bug_number;
@@ -273,7 +278,10 @@ int main(int argc, char** argv) {
                        "Required: Location of the test zip file."),
       tensorflow::Flag("unzip_binary_path",
                        tflite::testing::FLAGS_unzip_binary_path,
-                       "Required: Location of a suitable unzip binary.")};
+                       "Required: Location of a suitable unzip binary."),
+      tensorflow::Flag("use_nnapi", &tflite::testing::FLAGS_use_nnapi,
+                       "Whether to enable the NNAPI delegate")};
+
   bool success = tensorflow::Flags::Parse(&argc, argv, flags);
   if (!success || (argc == 2 && !strcmp(argv[1], "--helpfull"))) {
     fprintf(stderr, "%s", tensorflow::Flags::Usage(argv[0], flags).c_str());
@@ -281,6 +289,8 @@ int main(int argc, char** argv) {
   }
 
   ::tflite::LogToStderr();
+  // TODO(mikie): googletest arguments do not work - maybe the tensorflow flags
+  // parser removes them?
   ::testing::InitGoogleTest(&argc, argv);
   return RUN_ALL_TESTS();
 }
