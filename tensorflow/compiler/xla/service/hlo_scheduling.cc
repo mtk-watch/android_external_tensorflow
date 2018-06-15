@@ -36,29 +36,6 @@ using ::tensorflow::strings::HumanReadableNumBytes;
 
 namespace xla {
 
-StatusOr<int64> MinimumMemoryForSequence(
-    const SequentialHloOrdering::HloModuleSequence& module_sequence,
-    const LogicalBuffer::SizeFunction& size_function) {
-  if (module_sequence.empty()) {
-    return 0;
-  }
-
-  const HloModule* module = module_sequence.begin()->first->parent();
-  TF_ASSIGN_OR_RETURN(std::unique_ptr<TuplePointsToAnalysis> points_to_analysis,
-                      TuplePointsToAnalysis::Run(module));
-
-  // The absolute minimum memory required for a given sequence of instructions
-  // is determined by the sequence of Alloc and Free calls on a simulated heap,
-  // ignoring fragmentation. We run the heap simulation on the whole module,
-  // rather than summing each computation, since it gives us a better lower
-  // bound, by minimizing the liveness of sub-computations.
-  TF_ASSIGN_OR_RETURN(
-      HeapSimulator::Result result,
-      HeapSimulator::Run(MakeUnique<NoFragmentationStatsHeap>(), *module,
-                         module_sequence, *points_to_analysis, size_function));
-  return result.heap_size;
-}
-
 namespace {
 
 // Class implementing a list scheduler of HLO instructions which produces a
@@ -299,6 +276,8 @@ class ListScheduler {
       auto best_it = ready_queue.end();
       --best_it;
       const HloInstruction* best = best_it->second.instruction;
+      VLOG(2) << "Schedule instruction: " << best->ToShortString()
+              << " Bytes freed: " << best_it->first.first;
       ready_queue.erase(best_it);
       ready_instructions.erase(best);
       schedule.push_back(best);
@@ -396,7 +375,7 @@ int64 SumLogicalBufferSizes(
   return size;
 }
 
-StatusOr<std::vector<const HloInstruction*>> CreateMemoryMinimizingSequence(
+StatusOr<std::vector<const HloInstruction*>> ScheduleComputationsInModule(
     const HloComputation& computation,
     const TuplePointsToAnalysis& points_to_analysis,
     const LogicalBuffer::SizeFunction& size_function,
@@ -414,18 +393,6 @@ StatusOr<std::vector<const HloInstruction*>> CreateMemoryMinimizingSequence(
 
 }  // namespace
 
-StatusOr<int64> MinimumMemoryForComputation(
-    const HloComputation& computation,
-    const std::vector<const HloInstruction*>& sequence,
-    const TuplePointsToAnalysis& points_to_analysis,
-    const LogicalBuffer::SizeFunction& size_function) {
-  TF_ASSIGN_OR_RETURN(
-      HeapSimulator::Result result,
-      HeapSimulator::Run(MakeUnique<NoFragmentationStatsHeap>(), computation,
-                         sequence, points_to_analysis, size_function));
-  return result.heap_size;
-}
-
 StatusOr<std::vector<const HloInstruction*>> DFSMemoryScheduler(
     const HloComputation& computation,
     const TuplePointsToAnalysis& points_to_analysis,
@@ -437,6 +404,7 @@ StatusOr<std::vector<const HloInstruction*>> DFSMemoryScheduler(
   // simply users-1 for each instruction.  By subtracting 1, we're saying that
   // instructions with no users or a single user don't count; instructions with
   // lots of fan-out will be visited earlier.
+  int64 cumulative_total_size = 0;
   tensorflow::gtl::FlatMap<const HloInstruction*, int64> extra_users;
   tensorflow::gtl::FlatMap<const HloInstruction*, int64> total_sizes;
   for (const HloInstruction* hlo : computation.MakeInstructionPostOrder()) {
@@ -449,12 +417,21 @@ StatusOr<std::vector<const HloInstruction*>> DFSMemoryScheduler(
     int64 logical_buffer_size = SumLogicalBufferSizes(
         points_to_analysis.GetBuffersDefinedByInstruction(hlo), size_function);
     total_sizes[hlo] = logical_buffer_size;
+    cumulative_total_size += logical_buffer_size;
     tensorflow::gtl::FlatSet<const HloInstruction*> unique_operands(
         hlo->operands().begin(), hlo->operands().end());
     for (const HloInstruction* operand : unique_operands) {
       extra_users[hlo] += extra_users[operand];
       total_sizes[hlo] += total_sizes[operand];
     }
+    // total_sizes[hlo] transitively includes the sizes of all nodes that
+    // lead to it. But computation is a DAG, so we are double-counting nodes,
+    // which can lead to overflows for large programs.
+    // cumulative_total_size caps the size to prevent overflows.
+    // NOTE(dimvar): this is quite ugly and should be changed. It's unclear
+    // why we care about transitive sizes; when scheduling a node, its input
+    // and output buffers should be all that matters, not its "history".
+    total_sizes[hlo] = std::min(total_sizes[hlo], cumulative_total_size);
   }
   CHECK_EQ(extra_users.size(), computation.instruction_count());
   CHECK_EQ(total_sizes.size(), computation.instruction_count());
@@ -564,10 +541,9 @@ StatusOr<std::vector<const HloInstruction*>> DefaultMemoryScheduler(
   }
 }
 
-StatusOr<SequentialHloOrdering::HloModuleSequence>
-CreateMemoryMinimizingSequence(const HloModule& module,
-                               const LogicalBuffer::SizeFunction& size_function,
-                               const MemorySchedulerAlgorithm& algorithm) {
+StatusOr<SequentialHloOrdering::HloModuleSequence> ScheduleComputationsInModule(
+    const HloModule& module, const LogicalBuffer::SizeFunction& size_function,
+    const MemorySchedulerAlgorithm& algorithm) {
   SequentialHloOrdering::HloModuleSequence sequence;
   TF_ASSIGN_OR_RETURN(std::unique_ptr<TuplePointsToAnalysis> points_to_analysis,
                       TuplePointsToAnalysis::Run(&module));
@@ -575,7 +551,7 @@ CreateMemoryMinimizingSequence(const HloModule& module,
   for (const auto* computation : module.MakeComputationPostOrder()) {
     if (!computation->IsFusionComputation()) {
       TF_ASSIGN_OR_RETURN(auto one_computation_sequence,
-                          CreateMemoryMinimizingSequence(
+                          ScheduleComputationsInModule(
                               *computation, *points_to_analysis, size_function,
                               algorithm, memory_by_computation));
       memory_by_computation[computation] =
@@ -588,15 +564,15 @@ CreateMemoryMinimizingSequence(const HloModule& module,
   return sequence;
 }
 
-StatusOr<std::vector<const HloInstruction*>> CreateMemoryMinimizingSequence(
+StatusOr<std::vector<const HloInstruction*>> ScheduleOneComputation(
     const HloComputation& computation,
     const LogicalBuffer::SizeFunction& size_function) {
   CHECK(!computation.IsFusionComputation());
   TF_ASSIGN_OR_RETURN(std::unique_ptr<TuplePointsToAnalysis> points_to_analysis,
                       TuplePointsToAnalysis::Run(computation.parent()));
   tensorflow::gtl::FlatMap<const HloComputation*, int64> empty_map;
-  return CreateMemoryMinimizingSequence(computation, *points_to_analysis,
-                                        size_function, nullptr, empty_map);
+  return ScheduleComputationsInModule(computation, *points_to_analysis,
+                                      size_function, nullptr, empty_map);
 }
 
 }  // namespace xla

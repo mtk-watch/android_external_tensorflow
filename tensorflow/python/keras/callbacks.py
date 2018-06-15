@@ -424,7 +424,7 @@ class ModelCheckpoint(Callback):
 
     if mode not in ['auto', 'min', 'max']:
       logging.warning('ModelCheckpoint mode %s is unknown, '
-                      'fallback to auto mode.', (mode), RuntimeWarning)
+                      'fallback to auto mode.', mode)
       mode = 'auto'
 
     if mode == 'min':
@@ -451,7 +451,7 @@ class ModelCheckpoint(Callback):
         current = logs.get(self.monitor)
         if current is None:
           logging.warning('Can save best model only with %s available, '
-                          'skipping.', self.monitor, RuntimeWarning)
+                          'skipping.', self.monitor)
         else:
           if self.monitor_op(current, self.best):
             if self.verbose > 0:
@@ -515,7 +515,7 @@ class EarlyStopping(Callback):
 
     if mode not in ['auto', 'min', 'max']:
       logging.warning('EarlyStopping mode %s is unknown, '
-                      'fallback to auto mode.', mode, RuntimeWarning)
+                      'fallback to auto mode.', mode)
       mode = 'auto'
 
     if mode == 'min':
@@ -544,7 +544,7 @@ class EarlyStopping(Callback):
     if current is None:
       logging.warning('Early stopping conditioned on metric `%s` '
                       'which is not available. Available metrics are: %s',
-                      self.monitor, ','.join(list(logs.keys())), RuntimeWarning)
+                      self.monitor, ','.join(list(logs.keys())))
       return
     if self.monitor_op(current - self.min_delta, self.best):
       self.best = current
@@ -635,7 +635,11 @@ class LearningRateScheduler(Callback):
   def on_epoch_begin(self, epoch, logs=None):
     if not hasattr(self.model.optimizer, 'lr'):
       raise ValueError('Optimizer must have a "lr" attribute.')
-    lr = self.schedule(epoch)
+    try:  # new API
+      lr = float(K.get_value(self.model.optimizer.lr))
+      lr = self.schedule(epoch, lr)
+    except TypeError:  # Support for old API for backward compatibility
+      lr = self.schedule(epoch)
     if not isinstance(lr, (float, np.float32, np.float64)):
       raise ValueError('The output of the "schedule" function '
                        'should be float.')
@@ -901,7 +905,7 @@ class ReduceLROnPlateau(Callback):
     """
     if self.mode not in ['auto', 'min', 'max']:
       logging.warning('Learning Rate Plateau Reducing mode %s is unknown, '
-                      'fallback to auto mode.', self.mode, RuntimeWarning)
+                      'fallback to auto mode.', self.mode)
       self.mode = 'auto'
     if (self.mode == 'min' or
         (self.mode == 'auto' and 'acc' not in self.monitor)):
@@ -923,7 +927,7 @@ class ReduceLROnPlateau(Callback):
     if current is None:
       logging.warning('Reduce LR on plateau conditioned on metric `%s` '
                       'which is not available. Available metrics are: %s',
-                      self.monitor, ','.join(list(logs.keys())), RuntimeWarning)
+                      self.monitor, ','.join(list(logs.keys())))
 
     else:
       if self.in_cooldown():

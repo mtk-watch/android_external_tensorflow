@@ -20,9 +20,11 @@ limitations under the License.
 
 #include "tensorflow/core/common_runtime/device.h"
 #include "tensorflow/core/common_runtime/executor.h"
+#include "tensorflow/core/common_runtime/executor_factory.h"
 #include "tensorflow/core/common_runtime/graph_optimizer.h"
 #include "tensorflow/core/common_runtime/memory_types.h"
 #include "tensorflow/core/common_runtime/rendezvous_mgr.h"
+#include "tensorflow/core/framework/collective.h"
 #include "tensorflow/core/framework/function.h"
 #include "tensorflow/core/framework/node_def.pb.h"
 #include "tensorflow/core/framework/node_def_util.h"
@@ -214,6 +216,7 @@ class FunctionLibraryRuntimeImpl : public FunctionLibraryRuntime {
     const FunctionLibraryDefinition* overlay_lib = nullptr;  // Not owned.
     FunctionBody* func_graph = nullptr;
     Executor* exec = nullptr;
+    string executor_type;
 
     ~Item() {
       delete this->func_graph;
@@ -548,6 +551,7 @@ Status FunctionLibraryRuntimeImpl::Instantiate(
       item->func_graph = fbody;
       item->overlay_lib = options.overlay_lib;
       item->instantiation_counter = 1;
+      item->executor_type = options.executor_type;
       items_.emplace(next_handle_, std::unique_ptr<Item>(item));
       next_handle_++;
     }
@@ -622,10 +626,12 @@ void PruneFunctionBody(Graph* g) {
 Status FunctionLibraryRuntimeImpl::CreateItem(Handle handle, Item** item) {
   const FunctionBody* fbody;
   const FunctionLibraryDefinition* lib_def;
+  string executor_type;
   {
     mutex_lock l(mu_);
     fbody = (*item)->func_graph;
     lib_def = (*item)->overlay_lib;
+    executor_type = (*item)->executor_type;
   }
   if (!lib_def) {
     lib_def = base_lib_def_;
@@ -655,17 +661,14 @@ Status FunctionLibraryRuntimeImpl::CreateItem(Handle handle, Item** item) {
     DeleteNonCachedKernel(kernel);
   };
   Graph* graph = g.get();
-  Executor* exec;
-  TF_RETURN_IF_ERROR(NewLocalExecutor(params, std::move(g), &exec));
-
+  std::unique_ptr<Executor> exec;
+  TF_RETURN_IF_ERROR(NewExecutor(executor_type, params, std::move(g), &exec));
   {
     // Guard item since it is already inserted in items_.
     mutex_lock l(mu_);
-    if ((*item)->exec) {
-      delete exec;
-    } else {
+    if ((*item)->exec == nullptr) {
       (*item)->graph = graph;
-      (*item)->exec = exec;
+      (*item)->exec = exec.release();
     }
   }
   return Status::OK();
@@ -809,6 +812,7 @@ void FunctionLibraryRuntimeImpl::Run(const Options& opts, Handle handle,
   exec_args->cancellation_manager = run_opts.cancellation_manager;
   exec_args->step_container = run_opts.step_container;
   exec_args->runner = *run_opts.runner;
+  exec_args->collective_executor = run_opts.collective_executor;
 
   Item* item = nullptr;
   Status s = GetOrCreateItem(handle, &item);
@@ -896,6 +900,7 @@ void FunctionLibraryRuntimeImpl::Run(const Options& opts, Handle handle,
   exec_args->rendezvous = run_opts.rendezvous;
   exec_args->stats_collector = run_opts.stats_collector;
   exec_args->cancellation_manager = run_opts.cancellation_manager;
+  exec_args->collective_executor = run_opts.collective_executor;
   exec_args->step_container = run_opts.step_container;
   exec_args->runner = *run_opts.runner;
   exec_args->call_frame = frame;
