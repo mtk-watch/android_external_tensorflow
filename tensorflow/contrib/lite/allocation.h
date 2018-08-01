@@ -26,6 +26,8 @@ limitations under the License.
 
 namespace tflite {
 
+using std::string;
+
 // A memory allocation handle. This could be a mmap or shared memory.
 class Allocation {
  public:
