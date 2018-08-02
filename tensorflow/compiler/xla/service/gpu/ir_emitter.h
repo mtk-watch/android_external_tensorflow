@@ -88,6 +88,7 @@ class IrEmitter : public DfsHloVisitorWithDefault {
   Status HandleReduce(HloInstruction* reduce) override;
   Status HandleTuple(HloInstruction* tuple) override;
   Status HandleSelect(HloInstruction* select) override;
+  Status HandleTupleSelect(HloInstruction* tuple_select) override;
   Status HandleFusion(HloInstruction* fusion) override;
   Status HandleCall(HloInstruction* call) override;
   Status HandleCustomCall(HloInstruction* custom_call) override;
@@ -196,6 +197,13 @@ class IrEmitter : public DfsHloVisitorWithDefault {
   Status EmitAtomicOperationUsingCAS(const HloComputation& computation,
                                      llvm::Value* output_address,
                                      llvm::Value* source_address);
+
+  // A helper method for HandleSort(). It adds the inner comparison loop where
+  // we compare elements pointed to by 'keys_index' and 'compare_keys_index'.
+  void EmitCompareLoop(int64 dimension_to_sort,
+                       const llvm_ir::IrArray::Index& keys_index,
+                       const llvm_ir::IrArray::Index& compare_keys_index,
+                       const llvm_ir::IrArray& keys_array);
 
   StatusOr<llvm::Value*> ComputeNestedElement(
       const HloComputation& computation,

@@ -31,6 +31,7 @@ cc_library_static {
     srcs: ["context.c"],
     cflags: [
         "-Wno-typedef-redefinition",
+        "-Wno-visibility",
     ],
 }
 
@@ -64,6 +65,7 @@ cc_library_static {
         "-Wno-mismatched-tags",
         "-Wno-sign-compare",
         "-Wno-unused-lambda-capture",
+        "-Wno-invalid-partial-specialization",
     ],
 }
 
