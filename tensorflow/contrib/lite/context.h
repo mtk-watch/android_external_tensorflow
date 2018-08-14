@@ -29,6 +29,9 @@ limitations under the License.
 #ifndef TENSORFLOW_CONTRIB_LITE_CONTEXT_H_
 #define TENSORFLOW_CONTRIB_LITE_CONTEXT_H_
 
+#if defined(_MSC_VER)
+#include <complex.h>
+#endif
 #include <stdbool.h>
 #include <stdint.h>
 #include <stdlib.h>
@@ -180,7 +183,11 @@ typedef union {
   uint8_t* uint8;
   bool* b;
   int16_t* i16;
+#if defined(_MSC_VER)
+  _Fcomplex* c64;
+#else
   _Complex float* c64;
+#endif
 } TfLitePtrUnion;
 
 // Memory allocation strategies. kTfLiteMmapRo is for read-only memory-mapped
@@ -445,13 +452,15 @@ typedef struct _TfLiteDelegate {
 
   // Copy the data from delegate buffer handle to raw memory.
   // This can be null if the delegate doesn't use its own buffer.
-  TfLiteStatus (*CopyFromBufferHandle)(TfLiteDelegate* delegate,
+  TfLiteStatus (*CopyFromBufferHandle)(TfLiteContext* context,
+                                       TfLiteDelegate* delegate,
                                        TfLiteBufferHandle buffer_handle,
                                        void* data, size_t size);
 
   // Copy the data from raw memory to delegate buffer handle.
   // This can be null if the delegate doesn't use its own buffer.
-  TfLiteStatus (*CopyToBufferHandle)(TfLiteDelegate* delegate,
+  TfLiteStatus (*CopyToBufferHandle)(TfLiteContext* context,
+                                     TfLiteDelegate* delegate,
                                      TfLiteBufferHandle buffer_handle,
                                      void* data, size_t size);
 
@@ -459,11 +468,17 @@ typedef struct _TfLiteDelegate {
   // this doesn't release the underlying resource (e.g. textures). The
   // resources are either owned by application layer or the delegate.
   // This can be null if the delegate doesn't use its own buffer.
-  void (*FreeBufferHandle)(TfLiteDelegate* delegate,
+  void (*FreeBufferHandle)(TfLiteContext* context, TfLiteDelegate* delegate,
                            TfLiteBufferHandle* handle);
 } TfLiteDelegate;
 
 // WARNING: This is an experimental interface that is subject to change.
+//
+// Currently, TfLiteDelegateParams has to be allocated in a way that it's
+// trivially destructable. It will be stored as `builtin_data` field in
+// `TfLiteNode` of the delegate node.
+//
+// See also the `CreateDelegateParams` function in `interpreter.cc` details.
 typedef struct {
   TfLiteDelegate* delegate;
   TfLiteIntArray* nodes_to_replace;
