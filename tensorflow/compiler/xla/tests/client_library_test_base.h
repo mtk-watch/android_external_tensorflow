@@ -26,8 +26,8 @@ limitations under the License.
 #include "tensorflow/compiler/xla/array4d.h"
 #include "tensorflow/compiler/xla/client/client_library.h"
 #include "tensorflow/compiler/xla/client/global_data.h"
-#include "tensorflow/compiler/xla/client/xla_client/xla_builder.h"
-#include "tensorflow/compiler/xla/client/xla_client/xla_computation.h"
+#include "tensorflow/compiler/xla/client/xla_builder.h"
+#include "tensorflow/compiler/xla/client/xla_computation.h"
 #include "tensorflow/compiler/xla/literal.h"
 #include "tensorflow/compiler/xla/literal_util.h"
 #include "tensorflow/compiler/xla/ptr_util.h"
@@ -74,8 +74,9 @@ class ClientLibraryTestBase : public ::testing::Test {
   string TestName() const;
 
   void SetFastMathDisabled(bool disabled) {
-    execution_options_.mutable_debug_options()->set_xla_enable_fast_math(
-        !disabled);
+    auto* opts = execution_options_.mutable_debug_options();
+    opts->set_xla_cpu_enable_fast_math(!disabled);
+    opts->set_xla_gpu_enable_fast_math(!disabled);
   }
 
   void SetSeed(uint64 seed) { execution_options_.set_seed(seed); }
@@ -399,12 +400,16 @@ class ClientLibraryTestBase : public ::testing::Test {
                                const string& error_message)>& verify_output,
       const Shape* output_with_layout = nullptr);
 
+  // Converts an f32 shape/literal to bf16 if use_bfloat16_ is true.
+  Literal MaybeConvertLiteralToBfloat16(const Literal& literal);
+  Shape MaybeConvertShapeToBfloat16(const Shape& shape);
+
   // Whether to run tests with all float-type input/output converted to
   // bfloat16.
   bool use_bfloat16_ = false;
 
   // Arguments to be passed to the computation when it runs.
-  std::vector<std::unique_ptr<GlobalData>> arguments_;
+  std::vector<Literal> arguments_;
 };
 
 template <typename NativeT>

@@ -23,6 +23,9 @@ cc_defaults {
         "-Wextra",
         "-Wno-unused-parameter",
     ],
+    shared_libs: [
+        "liblog",
+    ],
 }
 
 cc_library_static {
@@ -45,6 +48,7 @@ cc_library_static {
         "error_reporter.cc",
         "graph_info.cc",
         "interpreter.cc",
+        "mmap_allocation.cc",
         "model.cc",
         "op_resolver.cc",
         "nnapi_delegate.cc",

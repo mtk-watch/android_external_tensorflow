@@ -628,16 +628,17 @@ def cast(x, dtype, name=None):
   ```
 
   The operation supports data types (for `x` and `dtype`) of
-  `uint8`, `int8`, `uint16`, `int16`, `int32`, `int64`, `float16`, `float32`,
-  `float64`, `complex64`, `complex128`, `bfloat16`. In case of casting from
-  complex types (`complex64`, `complex128`) to real types, only the real part
-  of `x` is returned. In case of casting from real types to complex types
-  (`complex64`, `complex128`), the imaginary part of the returned value is set
-  to `0`. The handling of complex types here matches the behavior of numpy.
+  `uint8`, `uint16`, `uint32`, `uint64`, `int8`, `int16`, `int32`, `int64`,
+  `float16`, `float32`, `float64`, `complex64`, `complex128`, `bfloat16`.
+  In case of casting from complex types (`complex64`, `complex128`) to real
+  types, only the real part of `x` is returned. In case of casting from real
+  types to complex types (`complex64`, `complex128`), the imaginary part of the
+  returned value is set to `0`. The handling of complex types here matches the
+  behavior of numpy.
 
   Args:
     x: A `Tensor` or `SparseTensor` of numeric type. It could be
-      `uint8`, `int8`, `uint16`, `int16`, `int32`, `int64`,
+      `uint8`, `uint16`, `uint32`, `uint64`, `int8`, `int16`, `int32`, `int64`,
       `float16`, `float32`, `float64`, `complex64`, `complex128`, `bfloat16`.
     dtype: The destination type. The list of supported dtypes is the same
       as `x`.
@@ -1035,6 +1036,31 @@ def div(x, y, name=None):
     `x / y` returns the quotient of x and y.
   """
   return _div_python2(x, y, name)
+
+
+def unsafe_div(x, y, name=None):
+  """Computes an unsafe divide which returns 0 if the y is zero.
+
+  Note that the function uses Python 3 division operator semantics.
+
+  Args:
+    x: A `Tensor`. Must be one of the following types:
+       `float32`, `float64`, `int16`, `int32`, `int64`.
+    y: A `Tensor` whose dtype is compatible with `x`.
+    name: A name for the operation (optional).
+  Returns:
+    The element-wise value of the x divided by y.
+  """
+
+  with ops.name_scope(name, "unsafe_div", [x, y]) as name:
+    x = ops.convert_to_tensor(x, name="x")
+    y = ops.convert_to_tensor(y, name="y", dtype=x.dtype.base_dtype)
+    x_dtype = x.dtype.base_dtype
+    y_dtype = y.dtype.base_dtype
+    if x_dtype != y_dtype:
+      raise TypeError(
+          "x and y must have the same dtype, got %r != %r" % (x_dtype, y_dtype))
+    return gen_math_ops.unsafe_div(x, y, name=name)
 
 
 # TODO(aselle): This should be removed
