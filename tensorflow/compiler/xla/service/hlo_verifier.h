@@ -37,6 +37,7 @@ class ShapeVerifier : public DfsHloVisitor {
   Status HandleSelect(HloInstruction* select) override;
   Status HandleTupleSelect(HloInstruction* tuple_select) override;
   Status HandleConcatenate(HloInstruction* concatenate) override;
+  Status HandleIota(HloInstruction* iota) override;
   Status HandleConvert(HloInstruction* convert) override;
   Status HandleBitcastConvert(HloInstruction* convert) override;
   Status HandleCopy(HloInstruction* copy) override;
@@ -44,6 +45,7 @@ class ShapeVerifier : public DfsHloVisitor {
   Status HandleConvolution(HloInstruction* convolution) override;
   Status HandleFft(HloInstruction* fft) override;
   Status HandleCrossReplicaSum(HloInstruction* crs) override;
+  Status HandleAllToAll(HloInstruction* hlo) override;
   Status HandleReducePrecision(HloInstruction* reduce_precision) override;
   Status HandleInfeed(HloInstruction*) override;
   Status HandleOutfeed(HloInstruction*) override;
@@ -82,6 +84,7 @@ class ShapeVerifier : public DfsHloVisitor {
       HloInstruction* batch_norm_inference) override;
   Status HandleBatchNormGrad(HloInstruction* batch_norm_grad) override;
   Status HandleGather(HloInstruction* gather) override;
+  Status HandleScatter(HloInstruction* scatter) override;
   Status HandleAfterAll(HloInstruction* token) override;
 
   Status FinishVisit(HloInstruction*) override { return Status::OK(); }
@@ -103,6 +106,13 @@ class ShapeVerifier : public DfsHloVisitor {
   Status CheckVariadicShape(const HloInstruction* instruction);
 
  private:
+  // Return true if the shapes of the two operands have the same element type,
+  // and the result shape either has the same element type as the operand
+  // shapes or mixed precision is allowed and the result shape and the operand
+  // shapes have floating point element types.
+  bool HasCompatibleElementTypes(const Shape& shape_0, const Shape& shape_1,
+                                 const Shape& result_shape);
+
   // Whether the inputs and output of an instruction can contain both F32s and
   // BF16s. Tuples that include both F32s and BF16s are allowed regardless of
   // this flag.

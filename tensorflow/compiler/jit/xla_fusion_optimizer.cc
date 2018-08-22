@@ -192,7 +192,7 @@ Status XlaFusionOptimizer::Optimize(grappler::Cluster* cluster,
     // If inputs to `node` can have conflicting deadness (i.e. some are alive
     // and some are dead) then don't compile it.  XLA cannot represent the
     // deadness semantics of these nodes correctly and auto-clustering these
-    // nodes can cause deadness propagate to nodes that should be live.
+    // nodes can cause deadness to propagate to nodes that should be live.
     if (node->IsMerge() || deadness->HasInputsWithMismatchingDeadness(*node)) {
       continue;
     }
