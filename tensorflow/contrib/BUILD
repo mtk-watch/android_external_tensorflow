@@ -46,6 +46,7 @@ py_library(
         "//tensorflow/contrib/gan",
         "//tensorflow/contrib/graph_editor:graph_editor_py",
         "//tensorflow/contrib/grid_rnn:grid_rnn_py",
+        "//tensorflow/contrib/hadoop",
         "//tensorflow/contrib/hooks",
         "//tensorflow/contrib/image:distort_image_py",
         "//tensorflow/contrib/image:image_py",
@@ -107,7 +108,6 @@ py_library(
         "//tensorflow/contrib/tfprof",
         "//tensorflow/contrib/timeseries",
         "//tensorflow/contrib/tpu",
-        "//tensorflow/contrib/tpu:tpu_py",
         "//tensorflow/contrib/training:training_py",
         "//tensorflow/contrib/util:util_py",
         "//tensorflow/python:util",
@@ -130,8 +130,12 @@ py_library(
         "//tensorflow/contrib/bigtable",  # depends on bigtable
         "//tensorflow/contrib/cloud:cloud_py",  # doesn't compile on Windows
         "//tensorflow/contrib/ffmpeg:ffmpeg_ops_py",
-        "//tensorflow/contrib/lite/python:lite",  # unix dependency, need to fix code
+        # TODO(aaroey): tensorrt dependency has to appear before tflite so the
+        # build can resolve its flatbuffers symbols within the tensorrt library.
+        # This is an issue with the tensorrt static library and will be fixed by
+        # the next tensorrt release, so fix the order here after that.
         "//tensorflow/contrib/tensorrt:init_py",  # doesn't compile on windows
+        "//tensorflow/contrib/lite/python:lite",  # unix dependency, need to fix code
     ]),
 )
 
@@ -143,6 +147,7 @@ cc_library(
         "//tensorflow/contrib/coder:all_kernels",
         "//tensorflow/contrib/data/kernels:dataset_kernels",
         "//tensorflow/contrib/factorization/kernels:all_kernels",
+        "//tensorflow/contrib/hadoop:dataset_kernels",
         "//tensorflow/contrib/input_pipeline:input_pipeline_ops_kernels",
         "//tensorflow/contrib/layers:sparse_feature_cross_op_kernel",
         "//tensorflow/contrib/nearest_neighbor:nearest_neighbor_ops_kernels",
@@ -178,6 +183,7 @@ cc_library(
         "//tensorflow/contrib/data:dataset_ops_op_lib",
         "//tensorflow/contrib/factorization:all_ops",
         "//tensorflow/contrib/framework:all_ops",
+        "//tensorflow/contrib/hadoop:dataset_ops_op_lib",
         "//tensorflow/contrib/input_pipeline:input_pipeline_ops_op_lib",
         "//tensorflow/contrib/layers:sparse_feature_cross_op_op_lib",
         "//tensorflow/contrib/nccl:nccl_ops_op_lib",
