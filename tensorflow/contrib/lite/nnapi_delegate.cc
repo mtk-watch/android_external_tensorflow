@@ -99,7 +99,10 @@ int32_t GetAndroidSdkVersion() {
   return 0;
 }
 
-static const int32_t kAndroidSdkVersion = GetAndroidSdkVersion();
+int32_t GetAndroidSdkVersionCached() {
+  static int32_t androidSdkVersion = GetAndroidSdkVersion();
+  return androidSdkVersion;
+}
 
 }  // namespace
 
@@ -640,6 +643,7 @@ TfLiteStatus AddOpsAndParams(
       case tflite::BuiltinOperator_NOT_EQUAL:
       case tflite::BuiltinOperator_SUM:
       case tflite::BuiltinOperator_REDUCE_MAX:
+      case tflite::BuiltinOperator_REDUCE_MIN:
       case tflite::BuiltinOperator_REDUCE_PROD:
       case tflite::BuiltinOperator_SQRT:
       case tflite::BuiltinOperator_RSQRT:
@@ -651,6 +655,9 @@ TfLiteStatus AddOpsAndParams(
       case tflite::BuiltinOperator_ONE_HOT:
       case tflite::BuiltinOperator_LOGICAL_AND:
       case tflite::BuiltinOperator_LOGICAL_NOT:
+      case tflite::BuiltinOperator_UNPACK:
+      case tflite::BuiltinOperator_FLOOR_DIV:
+      case tflite::BuiltinOperator_REDUCE_ANY:
         logError("Op code %d is currently not delegated to NNAPI", builtin);
         return kTfLiteError;
         break;
@@ -660,7 +667,7 @@ TfLiteStatus AddOpsAndParams(
         break;
     }
 
-    if (nnapi_version == 11 && kAndroidSdkVersion < 28) {
+    if (nnapi_version == 11 && GetAndroidSdkVersionCached() < 28) {
       FATAL("Op %d needs NNAPI1.1", builtin);
     }
 
