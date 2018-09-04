@@ -495,16 +495,6 @@ cc_library(
     ],
 )
 
-cc_library(
-    name = "warn_about_ints",
-    srcs = ["warn_about_ints.cc"],
-    hdrs = ["warn_about_ints.h"],
-    deps = [
-        "//tensorflow/core:framework",
-        "//tensorflow/core:protos_all_cc",
-    ],
-)
-
 # Private support libraries ---------------------------------------------------
 
 cc_header_only_library(
@@ -630,6 +620,7 @@ cc_library(
         ":gather_nd_op",
         ":gather_op",
         ":guarantee_const_op",
+        ":host_constant_op",
         ":identity_n_op",
         ":identity_op",
         ":inplace_ops",
@@ -700,6 +691,12 @@ tf_kernel_library(
 tf_kernel_library(
     name = "constant_op",
     prefix = "constant_op",
+    deps = ARRAY_DEPS,
+)
+
+tf_kernel_library(
+    name = "host_constant_op",
+    prefix = "host_constant_op",
     deps = ARRAY_DEPS,
 )
 
@@ -1283,6 +1280,7 @@ tf_cuda_cc_test(
     srcs = ["gather_op_test.cc"],
     deps = [
         ":gather_op",
+        ":host_constant_op",
         ":ops_testutil",
         ":ops_util",
         "//tensorflow/core:core_cpu",
@@ -1301,6 +1299,7 @@ tf_cuda_cc_test(
     srcs = ["gather_nd_op_test.cc"],
     deps = [
         ":gather_nd_op",
+        ":host_constant_op",
         ":ops_testutil",
         ":ops_util",
         "//tensorflow/core:core_cpu",
@@ -2297,6 +2296,31 @@ tf_cc_tests(
     ],
 )
 
+cc_library(
+    name = "eigen_benchmark",
+    testonly = 1,
+    hdrs = [
+        "eigen_benchmark.h",
+        ":eigen_helpers",
+    ],
+    deps = [
+        "//tensorflow/core:framework",
+        "//third_party/eigen3",
+    ],
+)
+
+tf_cc_test(
+    name = "eigen_benchmark_cpu_test",
+    srcs = ["eigen_benchmark_cpu_test.cc"],
+    deps = [
+        ":eigen_benchmark",
+        ":eigen_helpers",
+        "//tensorflow/core:test",
+        "//tensorflow/core:test_main",
+        "//third_party/eigen3",
+    ],
+)
+
 tf_cc_tests(
     name = "basic_ops_benchmark_test",
     size = "small",
@@ -2877,7 +2901,7 @@ tf_kernel_library(
     copts = if_override_eigen_strong_inline(["/DEIGEN_STRONG_INLINE=inline"]),
     prefix = "batch_matmul_op",
     deps = MATH_DEPS + if_mkl_ml([
-        "//third_party/intel_mkl_ml",
+        "//third_party/mkl:intel_binary_blob",
     ]),
 )
 
@@ -3169,6 +3193,7 @@ tf_cuda_cc_test(
         "//conditions:default": [],
     }),
     deps = [
+        ":host_constant_op",
         ":ops_testutil",
         ":ops_util",
         ":reduction_ops",
@@ -3304,6 +3329,7 @@ tf_cuda_cc_test(
     srcs = ["diag_op_test.cc"],
     deps = [
         ":diag_op",
+        ":host_constant_op",
         ":ops_testutil",
         ":ops_util",
         "//tensorflow/core:core_cpu",
@@ -3524,13 +3550,13 @@ tf_kernel_library(
 tf_kernel_library(
     name = "softplus_op",
     prefix = "softplus_op",
-    deps = NN_DEPS + [":warn_about_ints"],
+    deps = NN_DEPS,
 )
 
 tf_kernel_library(
     name = "softsign_op",
     prefix = "softsign_op",
-    deps = NN_DEPS + [":warn_about_ints"],
+    deps = NN_DEPS,
 )
 
 tf_kernel_library(
@@ -3631,6 +3657,7 @@ tf_cuda_cc_test(
     name = "nn_ops_test",
     srcs = ["nn_ops_test.cc"],
     deps = [
+        ":host_constant_op",
         ":nn",
         ":ops_testutil",
         ":ops_util",
@@ -3764,7 +3791,7 @@ tf_kernel_library(
         "spacetobatch_functor.h",
         "spacetobatch_functor_gpu.cu.cc",
     ],
-    visibility = ["//visibility:private"],
+    visibility = [":friends"],
     deps = [
         ":bounds_check",
         "//tensorflow/core:framework",
@@ -3778,6 +3805,7 @@ tf_cuda_cc_test(
     srcs = ["spacetobatch_benchmark_test.cc"],
     deps = [
         ":batch_space_ops",
+        ":host_constant_op",
         ":ops_testutil",
         ":ops_util",
         "//tensorflow/core:core_cpu",
@@ -3917,6 +3945,7 @@ tf_cuda_cc_test(
     size = "small",
     srcs = ["random_op_test.cc"],
     deps = [
+        ":host_constant_op",
         ":random_ops",
         "//tensorflow/core:core_cpu",
         "//tensorflow/core:framework",
@@ -4171,6 +4200,7 @@ tf_cuda_cc_tests(
         "sparse_xent_op_test.cc",
     ],
     deps = [
+        ":host_constant_op",
         ":ops_testutil",
         ":ops_util",
         ":sparse",
@@ -4191,6 +4221,7 @@ cc_library(
         "hinge-loss.h",
         "logistic-loss.h",
         "loss.h",
+        "poisson-loss.h",
         "smooth-hinge-loss.h",
         "squared-loss.h",
     ],
@@ -4384,6 +4415,7 @@ cc_library(
         ":regex_full_match_op",
         ":regex_replace_op",
         ":string_join_op",
+        ":string_length_op",
         ":string_split_op",
         ":string_strip_op",
         ":string_to_hash_bucket_op",
@@ -4419,6 +4451,12 @@ tf_kernel_library(
 )
 
 tf_kernel_library(
+    name = "string_length_op",
+    prefix = "string_length_op",
+    deps = STRING_DEPS,
+)
+
+tf_kernel_library(
     name = "regex_full_match_op",
     prefix = "regex_full_match_op",
     deps = STRING_DEPS + ["@com_googlesource_code_re2//:re2"],
@@ -4430,10 +4468,46 @@ tf_kernel_library(
     deps = STRING_DEPS + ["@com_googlesource_code_re2//:re2"],
 )
 
+tf_cc_test(
+    name = "regex_replace_op_test",
+    size = "small",
+    srcs = ["regex_replace_op_test.cc"],
+    deps = [
+        ":regex_replace_op",
+        "//tensorflow/core:core_cpu",
+        "//tensorflow/core:framework",
+        "//tensorflow/core:lib",
+        "//tensorflow/core:protos_all_cc",
+        "//tensorflow/core:test",
+        "//tensorflow/core:test_main",
+        "//tensorflow/core:testlib",
+        "//tensorflow/core/kernels:ops_testutil",
+        "//tensorflow/core/kernels:ops_util",
+    ],
+)
+
 tf_kernel_library(
     name = "string_split_op",
     prefix = "string_split_op",
     deps = STRING_DEPS,
+)
+
+tf_cc_test(
+    name = "string_split_op_test",
+    size = "small",
+    srcs = ["string_split_op_test.cc"],
+    deps = [
+        ":string_split_op",
+        "//tensorflow/core:core_cpu",
+        "//tensorflow/core:framework",
+        "//tensorflow/core:lib",
+        "//tensorflow/core:protos_all_cc",
+        "//tensorflow/core:test",
+        "//tensorflow/core:test_main",
+        "//tensorflow/core:testlib",
+        "//tensorflow/core/kernels:ops_testutil",
+        "//tensorflow/core/kernels:ops_util",
+    ],
 )
 
 tf_kernel_library(
@@ -4509,6 +4583,7 @@ tf_cuda_cc_test(
     size = "small",
     srcs = ["multinomial_op_test.cc"],
     deps = [
+        ":host_constant_op",
         ":multinomial_op",
         ":ops_util",
         "//tensorflow/core:core_cpu",
@@ -4536,6 +4611,7 @@ tf_cuda_cc_test(
     size = "small",
     srcs = ["parameterized_truncated_normal_op_test.cc"],
     deps = [
+        ":host_constant_op",
         ":ops_util",
         ":parameterized_truncated_normal_op",
         "//tensorflow/core:core_cpu",
@@ -5045,7 +5121,6 @@ filegroup(
         "training_ops.h",
         "transpose_functor.h",
         "transpose_op.h",
-        "warn_about_ints.h",
         "where_op.h",
         "xent_op.h",
     ],
@@ -5222,7 +5297,6 @@ filegroup(
         "transpose_functor_cpu.cc",
         "transpose_op.cc",
         "unique_op.cc",
-        "warn_about_ints.cc",
         "where_op.cc",
         "xent_op.cc",
         ":android_extended_ops_headers",
