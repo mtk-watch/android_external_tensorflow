@@ -21,6 +21,7 @@ cc_library_static {
         "allocation.cc",
         "arena_planner.cc",
         "context.c",
+        "delegates/nnapi/nnapi_delegate.cc",
         "error_reporter.cc",
 	"graph_info.cc",
         "interpreter.cc",
