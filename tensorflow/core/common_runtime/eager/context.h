@@ -65,10 +65,17 @@ enum ContextDevicePlacementPolicy {
 
 class EagerContext {
  public:
-  explicit EagerContext(const SessionOptions& opts,
-                        ContextDevicePlacementPolicy default_policy, bool async,
-                        std::unique_ptr<DeviceMgr> device_mgr,
-                        Rendezvous* rendezvous);
+  // TODO: remove this constructor once we migrate all callers to the next one.
+  EagerContext(const SessionOptions& opts,
+               ContextDevicePlacementPolicy default_policy, bool async,
+               std::unique_ptr<const DeviceMgr> device_mgr,
+               Rendezvous* rendezvous);
+
+  EagerContext(const SessionOptions& opts,
+               ContextDevicePlacementPolicy default_policy, bool async,
+               const DeviceMgr* device_mgr, bool device_mgr_owned,
+               Rendezvous* rendezvous);
+
   ~EagerContext();
 
   // Returns the function library runtime for the given device.
@@ -93,6 +100,9 @@ class EagerContext {
 
   // TODO(apassos) make this return a constant reference
   std::vector<Device*>* devices() { return &devices_; }
+  const std::vector<DeviceType>& prioritized_device_type_list() {
+    return prioritized_device_type_list_;
+  }
 
   // Clears the kernel caches.
   void ClearCaches();
@@ -204,11 +214,13 @@ class EagerContext {
       thread_local_policies_ GUARDED_BY(policy_map_mu_);
 
   // Only one of the below is set.
-  std::unique_ptr<DeviceMgr> local_device_manager_;
-  DeviceMgr* local_unowned_device_manager_;
+  std::unique_ptr<const DeviceMgr> local_device_manager_;
+  const DeviceMgr* local_unowned_device_manager_;
+  std::unique_ptr<DeviceMgr> remote_device_manager_;
 
   // Devices owned by device_manager
   std::vector<Device*> devices_;
+  std::vector<DeviceType> prioritized_device_type_list_;
   // All devices are not owned.
   gtl::FlatMap<string, Device*, StringPieceHasher> devices_map_;
   Rendezvous* rendezvous_;
@@ -253,7 +265,6 @@ class EagerContext {
 
 #ifndef __ANDROID__
   void CloseRemoteContexts();
-  std::unique_ptr<DeviceMgr> remote_device_manager_;
 
   // The server_ is not const since we release it when the context is destroyed.
   // Therefore the server_ object is not marked as const (even though it should
