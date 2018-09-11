@@ -23,7 +23,7 @@ third_party {
     type: GIT
     value: "https://github.com/tensorflow/tensorflow"
   }
-  version: "1.4.0"
+  version: "v1.4.0"
   last_upgrade_date { year: 2017 month: 11 day: 13 }
   license_type: NOTICE
 }
