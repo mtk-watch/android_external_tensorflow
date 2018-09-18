@@ -581,6 +581,7 @@ tf_xla_py_test(
         "//tensorflow/python:array_ops",
         "//tensorflow/python:framework",
         "//tensorflow/python:platform_test",
+        "@absl_py//absl/testing:parameterized",
     ],
 )
 
@@ -1103,6 +1104,7 @@ cc_library(
         "//tensorflow/core:test",
         "//tensorflow/core:testlib",
         "//tensorflow/core/kernels:ops_util",
+        "@com_google_absl//absl/strings",
     ],
 )
 
@@ -1196,7 +1198,7 @@ tf_xla_py_test(
 
 tf_xla_py_test(
     name = "xla_ops_test",
-    size = "small",
+    size = "medium",
     srcs = ["xla_ops_test.py"],
     disabled_backends = ["cpu_ondemand"],
     deps = [
