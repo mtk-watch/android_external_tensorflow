@@ -63,7 +63,7 @@ limitations under the License.
 #include "tensorflow/contrib/lite/context.h"
 #include "tensorflow/contrib/lite/kernels/kernel_util.h"
 #include "tensorflow/contrib/lite/kernels/op_macros.h"
-#include "util/hash/farmhash.h"
+#include "utils/hash/farmhash.h"
 
 namespace tflite {
 namespace ops {
