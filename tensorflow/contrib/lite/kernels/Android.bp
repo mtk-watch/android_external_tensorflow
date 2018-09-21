@@ -97,6 +97,7 @@ cc_library_static {
         "unidirectional_sequence_lstm.cc",
         "unidirectional_sequence_rnn.cc",
         "unpack.cc",
+        "zeros_like.cc",
 	"internal/kernel_utils.cc",
         "internal/tensor_utils.cc",
         "internal/quantization_util.cc",
