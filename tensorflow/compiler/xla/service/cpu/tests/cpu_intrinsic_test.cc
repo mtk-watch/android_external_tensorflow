@@ -91,7 +91,7 @@ TEST_P(CpuUnaryIntrinsicTest, DoIt) {
       /*entry_point_name=*/"entry",
       /*relocation_model=*/CpuAotCompilationOptions::RelocationModel::Static};
 
-  auto hlo_module = CreateNewModule();
+  auto hlo_module = CreateNewVerifiedModule();
   hlo_module->AddEntryComputation(std::move(computation));
 
   string check_lines{spec.check_lines.data(), spec.check_lines.size()};
@@ -140,10 +140,10 @@ IntrinsicTestSpec CpuUnaryIntrinsicTestCases[] = {
         HloOpcode::kLog, kTriple_android_arm, "",
         R"(CHECK: fadd fast <4 x float> <float 0x3FBDE4A340000000, float 0x3FBDE4A340000000, float 0x3FBDE4A340000000, float 0x3FBDE4A340000000>)"}};
 
-INSTANTIATE_TEST_CASE_P(CpuUnaryIntrinsicTestInstantiation,
-                        CpuUnaryIntrinsicTest,
-                        ::testing::ValuesIn(CpuUnaryIntrinsicTestCases),
-                        CpuUnaryIntrinsicTest::Name);
+INSTANTIATE_TEST_SUITE_P(CpuUnaryIntrinsicTestInstantiation,
+                         CpuUnaryIntrinsicTest,
+                         ::testing::ValuesIn(CpuUnaryIntrinsicTestCases),
+                         CpuUnaryIntrinsicTest::Name);
 
 }  // namespace
 }  // namespace cpu
