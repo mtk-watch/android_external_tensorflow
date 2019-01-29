@@ -50,7 +50,7 @@ class CpuEigenDotOperationTest
         /*entry_point_name=*/"entry",
         /*relocation_model=*/CpuAotCompilationOptions::RelocationModel::Static};
 
-    auto hlo_module = CreateNewModule();
+    auto hlo_module = CreateNewVerifiedModule();
     hlo_module->AddEntryComputation(std::move(entry_computation));
 
     CompileAheadOfTimeAndVerifyIr(std::move(hlo_module), options,
@@ -102,10 +102,10 @@ std::vector<DotTestSpec> GetDotTestCases() {
   return result;
 }
 
-INSTANTIATE_TEST_CASE_P(CpuEigenDotOperationTestInstantiation,
-                        CpuEigenDotOperationTest,
-                        ::testing::ValuesIn(GetDotTestCases()),
-                        DotTestSpecToString);
+INSTANTIATE_TEST_SUITE_P(CpuEigenDotOperationTestInstantiation,
+                         CpuEigenDotOperationTest,
+                         ::testing::ValuesIn(GetDotTestCases()),
+                         DotTestSpecToString);
 
 }  // namespace
 }  // namespace cpu
