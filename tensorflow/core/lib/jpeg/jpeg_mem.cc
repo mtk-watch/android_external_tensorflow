@@ -152,10 +152,13 @@ uint8* UncompressLow(const void* srcdata, FewerArgsForCompiler* argball) {
   cinfo.scale_denom = ratio;
   cinfo.dct_method = flags.dct_method;
 
-  jpeg_start_decompress(&cinfo);
+  // Determine the output image size before attempting decompress to prevent
+  // OOM'ing doing the decompress
+  jpeg_calc_output_dimensions(&cinfo);
 
   int64 total_size = static_cast<int64>(cinfo.output_height) *
-                     static_cast<int64>(cinfo.output_width);
+                     static_cast<int64>(cinfo.output_width) *
+                     static_cast<int64>(cinfo.num_components);
   // Some of the internal routines do not gracefully handle ridiculously
   // large images, so fail fast.
   if (cinfo.output_width <= 0 || cinfo.output_height <= 0) {
@@ -169,6 +172,8 @@ uint8* UncompressLow(const void* srcdata, FewerArgsForCompiler* argball) {
     jpeg_destroy_decompress(&cinfo);
     return nullptr;
   }
+
+  jpeg_start_decompress(&cinfo);
 
   JDIMENSION target_output_width = cinfo.output_width;
   JDIMENSION target_output_height = cinfo.output_height;
