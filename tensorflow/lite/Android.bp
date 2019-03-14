@@ -70,11 +70,12 @@ cc_library_static {
         "gemmlowp_headers",
     ],
     cflags: [
+        "-Wno-deprecated-declarations",
         "-Wno-extern-c-compat",
+        "-Wno-invalid-partial-specialization",
         "-Wno-mismatched-tags",
         "-Wno-sign-compare",
         "-Wno-unused-lambda-capture",
-        "-Wno-invalid-partial-specialization",
     ],
 }
 
