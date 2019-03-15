@@ -132,7 +132,7 @@ def assert_ops_in_graph(expected_ops, graph):
 
 
 @tf_export("test.assert_equal_graph_def", v1=[])
-def assert_equal_graph_def_v2(actual, expected):
+def assert_equal_graph_def_v2(expected, actual):
   """Asserts that two `GraphDef`s are (mostly) the same.
 
   Compares two `GraphDef` protos for equality, ignoring versions and ordering of
@@ -141,8 +141,8 @@ def assert_equal_graph_def_v2(actual, expected):
   ignores randomized attribute values that may appear in V2 checkpoints.
 
   Args:
-    actual: The `GraphDef` we have.
     expected: The `GraphDef` we expected.
+    actual: The `GraphDef` we have.
 
   Raises:
     AssertionError: If the `GraphDef`s do not match.
@@ -650,7 +650,7 @@ def _find_reference_cycle(objects, idx):
     return None
 
   # Note: this function is meant to help with diagnostics. Its output is purely
-  # a human readable representation, so you may freely modify it to suit your
+  # a human-readable representation, so you may freely modify it to suit your
   # needs.
   def describe(obj, blacklist, leaves_only=False):
     """Returns a custom human-readable summary of obj.
@@ -1012,10 +1012,12 @@ def py_func_if_in_function(f):
     if not ops.get_default_graph()._building_function:
       return f(*args, **kwds)
 
-    tensor_args, tensor_indices = zip(*[(x, i)
-                                        for i, x in enumerate(args)
-                                        if isinstance(x, (ops.Tensor,
-                                                          variables.Variable))])
+    tensor_args = []
+    tensor_indices = []
+    for i, arg in enumerate(args):
+      if isinstance(arg, (ops.Tensor, variables.Variable)):
+        tensor_args.append(arg)
+        tensor_indices.append(i)
 
     def inner_f(*inner_tensor_args):
       my_args = list(args)
@@ -1200,7 +1202,7 @@ def run_v2_only(func=None):
 def run_gpu_only(func=None):
   """Execute the decorated test only if a GPU is available.
 
-  This function is intended to be applied to tests that require the precense
+  This function is intended to be applied to tests that require the presence
   of a GPU. If a GPU is absent, it will simply be skipped.
 
   Args:
@@ -1273,7 +1275,7 @@ def is_gpu_available(cuda_only=False, min_cuda_compute_capability=None):
       CUDA compute capability required, or None if no requirement.
 
   Returns:
-    True iff a gpu device of the requested kind is available.
+    True if a gpu device of the requested kind is available.
   """
 
   def compute_capability_from_device_desc(device_desc):
@@ -1374,7 +1376,7 @@ class FakeEagerSession(object):
 
   Since the feed_dict is empty when not using placeholders we should be able to
   call self.evaluate(), however this requires rewriting the test case.
-  This class shold be considered a stop-gap solution to get tests running with
+  This class should be considered a stop-gap solution to get tests running with
   eager with minimal changes to the actual test.
   """
 
@@ -1426,6 +1428,36 @@ class ErrorLoggingSession(session.Session):
       raise
 
 
+def use_deterministic_cudnn(func):
+  """Disable autotuning during the call to this function.
+
+  Some tests want to base assertions on a graph being isomorphic with a copy.
+  To ensure this, this decorator disables autotuning.
+
+  Args:
+    func: Function to run with CUDNN autotuning turned off.
+
+  Returns:
+    Decorated function.
+  """
+
+  def decorator(f):
+
+    def decorated(self, *args, **kwargs):
+      original_var = os.environ.get("TF_CUDNN_DETERMINISTIC", "")
+      os.environ["TF_CUDNN_DETERMINISTIC"] = "true"
+      result = f(self, *args, **kwargs)
+      os.environ["TF_CUDNN_DETERMINISTIC"] = original_var
+      return result
+
+    return decorated
+
+  if func is not None:
+    return decorator(func)
+
+  return decorator
+
+
 # The description is just for documentation purposes.
 def disable_xla(description):
 
@@ -1460,7 +1492,7 @@ def disable_all_xla(description):
       value = getattr(cls, name)
       if callable(value) and name.startswith(
           "test") and not name == "test_session":
-        setattr(cls, name, base_decorator(value))
+        setattr(cls, name, base_decorator(description)(value))
     return cls
 
   return disable_all_impl
@@ -1487,7 +1519,8 @@ class TensorFlowTestCase(googletest.TestCase):
     if is_xla_enabled():
       os.putenv(
           "TF_XLA_FLAGS", "--tf_xla_auto_jit=2 --tf_xla_min_cluster_size=1 "
-          "--tf_xla_enable_lazy_compilation=false")
+          "--tf_xla_enable_lazy_compilation=false " +
+          os.getenv("TF_XLA_FLAGS", ""))
     self._threads = []
     self._tempdir = None
     self._cached_session = None
@@ -1661,6 +1694,10 @@ class TensorFlowTestCase(googletest.TestCase):
           return sparse_tensor.SparseTensorValue(tensor.indices.numpy(),
                                                  tensor.values.numpy(),
                                                  tensor.dense_shape.numpy())
+        elif isinstance(tensor, ops.IndexedSlices):
+          return ops.IndexedSlicesValue(values=tensor.values.numpy(),
+                                        indices=tensor.indices.numpy(),
+                                        dense_shape=tensor.dense_shape.numpy())
         return tensor.numpy()
       except AttributeError as e:
         six.raise_from(ValueError("Unsupported type %s." % type(tensor)), e)
@@ -2170,7 +2207,7 @@ class TensorFlowTestCase(googletest.TestCase):
 
   @py_func_if_in_function
   def assertNotAllClose(self, a, b, **kwargs):
-    """Assert that two numpy arrays, or or Tensors, do not have near values.
+    """Assert that two numpy arrays, or Tensors, do not have near values.
 
     Args:
       a: the first value to compare.

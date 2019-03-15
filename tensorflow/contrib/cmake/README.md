@@ -154,12 +154,12 @@ suitable interface for project configuration and dependency setting.
 5.  Click on `Configure`, a new window will be prompted out, specify the
     generator mode for the project generation. For Windows, choose `Visual
     Studio <version> <year> Win64`, for Linux, choose `Unix Makefiles`, then
-    press `Finish`. Wait for a moment, the default project dependecy would
+    press `Finish`. Wait for a moment, the default project dependency would
     automatically generate.
 6.  There are a few options that you can customize your own build. **The setting
     here is crucial for a successful build, please check all items carefully.**
 
-    *   `tensorflow_BUILD_ALL_KERNELS` should alway be `on`
+    *   `tensorflow_BUILD_ALL_KERNELS` should always be `on`
     *   `tensorflow_BUILD_CC_EXAMPLE` is default to be `on`. This can help you
         to test build (optional)
     *   `tensorflow_BUILD_CONTRIB_KERNELS` is default to be `on`, but it won't
@@ -278,7 +278,7 @@ suitable interface for project configuration and dependency setting.
     `make -sj<number-of-threads> install`
 
     Where `<number-of-threads>` is the threads used for the compilation, change
-    to any integer less or equal to your computer's maxiumum thread number.
+    to any integer less or equal to your computer's maximum thread number.
 
     Headers are discretely located in the build folders. Tensorflow library can
     be found at `<path-to-build>`, namely `tensorflow.so` (Linux) or
@@ -294,11 +294,12 @@ Here we assume that you have basic knowledge on gathering dependency with
     `CMakeLists.txt` and the c++ file `main.cxx`
 2.  Fill in the `main.cxx` with the code provided in
     [official c++ api basic](https://www.tensorflow.org/api_guides/cc/guide).
-3.  Fill in the `CMakeLists.txt` with following code: ``` cmake
+3.  Fill in the `CMakeLists.txt` with following code:
+
+    ```cmake
     cmake_minimum_required (VERSION 2.6) project (tf_hello)
 
     # Tensorflow
-
     find_package(Tensorflow REQUIRED)
     include_directories(${TENSORFLOW_INCLUDE_DIRS})
 
@@ -314,7 +315,8 @@ Here we assume that you have basic knowledge on gathering dependency with
     this CMakeList.txt, under development") endif()
 
     add_executable(tf_hello main.cxx) target_link_libraries(tf_hello
-    ${TENSORFLOW_LIBRARIES}) ```
+    ${TENSORFLOW_LIBRARIES})
+    ```
 
 4.  Configure the folder with cmake-gui, an error should be prompted out,
     requesting you to locate the folder containing `TensorflowConfig.cmake`.
