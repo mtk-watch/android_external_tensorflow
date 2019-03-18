@@ -17,8 +17,10 @@ from __future__ import absolute_import
 from __future__ import division
 from __future__ import print_function
 
+import functools
 from absl.testing import parameterized
 import numpy as np
+import six
 
 from tensorflow.contrib.distribute.python import combinations
 from tensorflow.contrib.distribute.python import mirrored_strategy
@@ -77,11 +79,7 @@ def strategies_for_embedding_models():
   and DefaultStrategy in order to prevent testing timeouts.
   """
 
-  strategies = [s for s in all_strategies
-                if not s.required_tpu and s.required_gpus is not None]
-  strategies.append(combinations.tpu_strategy_loop_on_device)
-  strategies.append(combinations.tpu_strategy_one_step_loop_on_device)
-  return strategies
+  return [s for s in all_strategies if s.required_tpu or s.required_gpus]
 
 
 def test_combinations_for_embedding_model():
@@ -91,6 +89,16 @@ def test_combinations_for_embedding_model():
                                strategies_for_embedding_models()),
           (graph_mode_test_configuration() +
            eager_mode_test_configuration())))
+
+
+def test_combinations_with_tpu_strategies():
+  tpu_strategies = [combinations.tpu_strategy,
+                    combinations.tpu_strategy_one_step]
+
+  return (
+      combinations.times(
+          combinations.combine(distribution=tpu_strategies),
+          graph_mode_test_configuration()))
 
 
 class MaybeDistributionScope(object):
@@ -133,6 +141,19 @@ def get_batch_size(global_batch_size, distribution):
   return batch_size
 
 
+def get_data_size(data):
+  """Gets the size of data in list, tuple, dict, or a numpy array."""
+  assert isinstance(data, (np.ndarray, list, dict, tuple))
+
+  if isinstance(data, np.ndarray):
+    return len(data)
+
+  if isinstance(data, (list, tuple)):
+    return len(data[0])
+
+  return len(six.next(six.itervalues(data)))
+
+
 def get_correctness_test_inputs(use_numpy, use_validation_data,
                                 with_distribution, x_train, y_train, x_predict):
   """Generates the inputs for correctness check when enable Keras with DS."""
@@ -159,11 +180,12 @@ def get_correctness_test_inputs(use_numpy, use_validation_data,
           'y': y_train,
       }
     predict_inputs = {
-        'x': np.array(x_predict, dtype=np.float32),
+        'x': x_predict
     }
   else:
-    if len(x_train) < _GLOBAL_BATCH_SIZE * _EVAL_STEPS:
-      # Currently, we cannot detech the size of a dataset. So, the eval steps is
+    training_data_size = get_data_size(x_train)
+    if training_data_size < _GLOBAL_BATCH_SIZE * _EVAL_STEPS:
+      # Currently, we cannot detect the size of a dataset. So, the eval steps is
       # hard coded.
       raise ValueError('x_train must have at least '
                        '_GLOBAL_BATCH_SIZE * _EVAL_STEPS samples')
@@ -179,7 +201,7 @@ def get_correctness_test_inputs(use_numpy, use_validation_data,
         'y': None,
         'epochs': training_epochs,
         'shuffle': False,
-        'steps_per_epoch': len(x_train) // global_batch_size,
+        'steps_per_epoch': training_data_size // global_batch_size,
     }
     if use_validation_data:
       eval_inputs = None  # Remove the eval_inputs
@@ -195,7 +217,8 @@ def get_correctness_test_inputs(use_numpy, use_validation_data,
           'steps': _EVAL_STEPS,
       }
 
-    predict_batch_size = get_batch_size(len(x_predict), with_distribution)
+    predict_batch_size = get_batch_size(get_data_size(x_predict),
+                                        with_distribution)
     predict_dataset = dataset_ops.Dataset.from_tensor_slices(x_predict)
     predict_dataset = batch_wrapper(predict_dataset, predict_batch_size,
                                     with_distribution)
@@ -207,11 +230,11 @@ def get_correctness_test_inputs(use_numpy, use_validation_data,
   return training_inputs, eval_inputs, predict_inputs
 
 
-def fit_eval_and_predict(
-    initial_weights, input_fn, model_fn, distribution=None):
+def fit_eval_and_predict(initial_weights, input_fn, model_fn,
+                         distribution=None, is_stateful_model=False):
   """Generates results for fit/predict/evaluate for given model."""
   model = model_fn(initial_weights=initial_weights, distribution=distribution)
-  training_inputs, eval_inputs, predict_inputs = input_fn(distribution)
+  training_inputs, eval_inputs, predict_inputs = input_fn()
 
   result = {}
   result['training_history_1'] = model.fit(**training_inputs).history
@@ -222,7 +245,15 @@ def fit_eval_and_predict(
   result['weights_1'] = model.get_weights()
 
   if predict_inputs is not None:
-    result['predict_result_1'] = model.predict(**predict_inputs)
+    # Check correctness of the result of predict() invoked
+    # multiple times -- as for stateful models, result of
+    # predict may differ for each batch.
+    predict_length = 1
+    if is_stateful_model:
+      predict_length = 3
+    for i in range(predict_length):
+      result_key = 'predict_result_{}'.format(i)
+      result[result_key] = model.predict(**predict_inputs)
 
   # Train and eval again to mimic user's flow.
 
@@ -241,19 +272,20 @@ def compare_results(results_with_ds, results_without_ds, distribution,
   """Compares results of model compiled with/without distribution strategy."""
 
   default_tolerance = 1e-5
-  tol_table = {}
+  relaxed_tolerance = 1e-4
 
-  if isinstance(distribution, (
-      mirrored_strategy.MirroredStrategy,
-      mirrored_strategy.CoreMirroredStrategy,
-      distribute_lib._DefaultDistributionStrategy)):  # pylint: disable=protected-access
-    # TODO(b/119257215): Weights are not exactly the same, so use larger
-    # tolerance for now. Predict should be related to weights.
-    tol_table = {
-        'weights_1': 1e-4,
-        'weights_2': 1e-4,
-        'predict_result_1': 1e-4,
-    }
+  def _get_compare_result_tolerance(key):
+    """Returns tolerance to compare results."""
+    # TODO(b/119257215): For MirroredStrategy, weights are not exactly the same,
+    # so use larger tolerance for now. Predict should be related to weights.
+    if (isinstance(distribution, (
+        mirrored_strategy.MirroredStrategy,
+        mirrored_strategy.CoreMirroredStrategy,
+        distribute_lib._DefaultDistributionStrategy)) and  # pylint: disable=protected-access
+        key.startswith(('weights_1', 'weights_2', 'predict_result'))):
+      return relaxed_tolerance
+
+    return default_tolerance
 
   for key in results_with_ds:
     if (key.startswith('training_history') and
@@ -263,8 +295,7 @@ def compare_results(results_with_ds, results_without_ds, distribution,
       # underlying bug is fixed.
       continue
 
-    tolerance = tol_table.get(key, default_tolerance)
-
+    tolerance = _get_compare_result_tolerance(key)
     testcase.assertAllClose(
         results_with_ds[key],
         results_without_ds[key],
@@ -315,6 +346,22 @@ class TestDistributionStrategyCorrectnessBase(test.TestCase,
     y_train = x_train
     return (x_train.astype('float32'), y_train.astype('float32'), None)
 
+  def get_input_for_correctness_test(self, **kwargs):
+    """Generates inputs that are dictionaries.
+
+    We only provide a default implementation of this method here. If you need
+    more customized way of providing input to your model, overwrite this method.
+
+    Arguments:
+      **kwargs: key word arguments about how to create the input dictionaries
+
+    Returns:
+      Three dictionaries representing the input for fit(), evalutate() and
+      predict()
+    """
+
+    return get_correctness_test_inputs(**kwargs)
+
   def get_model(self, distribution=None):
     raise NotImplementedError
 
@@ -334,7 +381,8 @@ class TestDistributionStrategyCorrectnessBase(test.TestCase,
                            distribution,
                            use_numpy,
                            use_validation_data,
-                           with_batch_norm=False):
+                           with_batch_norm=False,
+                           is_stateful_model=False):
     with self.cached_session():
       self.set_up_test_config(use_numpy, use_validation_data, with_batch_norm)
       self.skip_unsupported_test_configuration(distribution)
@@ -342,23 +390,42 @@ class TestDistributionStrategyCorrectnessBase(test.TestCase,
       # Train, eval, and predict datasets are created with the same input numpy
       # arrays.
       x_train, y_train, x_predict = self.get_data()
-
       # The model is built once and the initial weights are saved.
       # This is used to initialize the model for both the distribution and
       # non-distribution run.
       model = self.get_model()
       initial_weights = model.get_weights()
 
-      def input_fn(dist):
-        return get_correctness_test_inputs(
-            use_numpy, use_validation_data, dist, x_train, y_train, x_predict)
+      ds_input_fn = functools.partial(
+          self.get_input_for_correctness_test,
+          use_numpy=use_numpy,
+          use_validation_data=use_validation_data,
+          with_distribution=distribution,
+          x_train=x_train,
+          y_train=y_train,
+          x_predict=x_predict)
+
+      nods_input_fn = functools.partial(
+          self.get_input_for_correctness_test,
+          use_numpy=use_numpy,
+          use_validation_data=use_validation_data,
+          with_distribution=None,
+          x_train=x_train,
+          y_train=y_train,
+          x_predict=x_predict)
 
       results_with_ds = fit_eval_and_predict(
-          initial_weights, input_fn=input_fn, model_fn=self.get_model,
-          distribution=distribution)
+          initial_weights,
+          input_fn=ds_input_fn,
+          model_fn=self.get_model,
+          distribution=distribution,
+          is_stateful_model=is_stateful_model)
       results_without_ds = fit_eval_and_predict(
-          initial_weights, input_fn=input_fn, model_fn=self.get_model,
-          distribution=None)
+          initial_weights,
+          input_fn=nods_input_fn,
+          model_fn=self.get_model,
+          distribution=None,
+          is_stateful_model=is_stateful_model)
 
       # First, special case, for multi-replica distributed training, batch norm
       # is not aggregated globally. So it is expected to have different weights.
@@ -370,6 +437,23 @@ class TestDistributionStrategyCorrectnessBase(test.TestCase,
       else:
         compare_results(results_with_ds, results_without_ds, distribution,
                         testcase=self)
+
+  def get_input_for_dynamic_lr_test(self, **kwargs):
+    """Generates inputs that are dictionaries.
+
+    We only provide a default implementation of this method here. If you need
+    more customized way of providing input to your model, overwrite this method.
+
+    Arguments:
+      **kwargs: key word arguments about how to create the input dictionaries
+
+    Returns:
+      Three dictionaries representing the input for fit(), evalutate() and
+      predict()
+    """
+
+    training_input = kwargs
+    return training_input, None, None
 
   def run_dynamic_lr_test(self, distribution):
     with self.cached_session():
@@ -388,30 +472,41 @@ class TestDistributionStrategyCorrectnessBase(test.TestCase,
         # same as TPU.
         update_freq = distribution.extended.steps_per_run
 
-      def input_fn(dist):
-        """Generates training test given test configuration."""
-        training_epochs = 2
-        global_batch_size = 64
-        batch_size = get_batch_size(global_batch_size, dist)
+      training_epochs = 2
+      global_batch_size = 64
 
-        training_inputs = {
-            'batch_size': batch_size,
-            'x': x_train,
-            'y': y_train,
-            'epochs': training_epochs,
-            'shuffle': False,
-            'callbacks': [LearningRateBatchScheduler(update_freq)],
-            'validation_data': (x_train, y_train)
-        }
-        # In this test case, we do not care eval and predict.
-        eval_inputs, predict_inputs = None, None
-        return training_inputs, eval_inputs, predict_inputs
+      ds_batch_size = get_batch_size(global_batch_size, distribution)
+      nods_batch_size = get_batch_size(global_batch_size, None)
+
+      ds_input_fn = functools.partial(
+          self.get_input_for_dynamic_lr_test,
+          x=x_train,
+          y=y_train,
+          batch_size=ds_batch_size,
+          shuffle=False,
+          epochs=training_epochs,
+          callbacks=[LearningRateBatchScheduler(update_freq)],
+          validation_data=(x_train, y_train))
+
+      nods_input_fn = functools.partial(
+          self.get_input_for_dynamic_lr_test,
+          x=x_train,
+          y=y_train,
+          batch_size=nods_batch_size,
+          shuffle=False,
+          epochs=training_epochs,
+          callbacks=[LearningRateBatchScheduler(update_freq)],
+          validation_data=(x_train, y_train))
 
       results_with_ds = fit_eval_and_predict(
-          initial_weights, input_fn=input_fn, model_fn=self.get_model,
+          initial_weights,
+          input_fn=ds_input_fn,
+          model_fn=self.get_model,
           distribution=distribution)
       results_without_ds = fit_eval_and_predict(
-          initial_weights, input_fn=input_fn, model_fn=self.get_model,
+          initial_weights,
+          input_fn=nods_input_fn,
+          model_fn=self.get_model,
           distribution=None)
       compare_results(results_with_ds, results_without_ds, distribution,
                       testcase=self)
@@ -448,7 +543,7 @@ class TestDistributionStrategyEmbeddingModelCorrectnessBase(
         features, maxlen=max_words)
     x_train = np.asarray(features, dtype=np.float32)
     y_train = np.asarray(labels, dtype=np.int32).reshape((count, 1))
-    x_predict = x_train
+    x_predict = x_train[:_GLOBAL_BATCH_SIZE]
     return x_train, y_train, x_predict
 
 

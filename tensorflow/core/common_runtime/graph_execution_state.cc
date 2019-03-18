@@ -23,6 +23,7 @@ limitations under the License.
 #include <vector>
 
 #include "tensorflow/core/common_runtime/device.h"
+#include "tensorflow/core/common_runtime/metrics.h"
 #include "tensorflow/core/common_runtime/optimization_registry.h"
 #include "tensorflow/core/common_runtime/placer.h"
 #include "tensorflow/core/framework/attr_value.pb.h"
@@ -570,8 +571,11 @@ Status GraphExecutionState::InitBaseGraph(const BuildGraphOptions& options) {
   TF_RETURN_IF_ERROR(OptimizationPassRegistry::Global()->RunGrouping(
       OptimizationPassRegistry::PRE_PLACEMENT, optimization_options));
 
-  Placer placer(new_graph.get(), device_set_, session_options_,
-                /* default_device= */ nullptr);
+  Placer placer(new_graph.get(), device_set_, /* default_device= */ nullptr,
+                session_options_ == nullptr ||
+                    session_options_->config.allow_soft_placement(),
+                session_options_ != nullptr &&
+                    session_options_->config.log_device_placement());
   // TODO(mrry): Consider making the Placer cancelable.
   TF_RETURN_IF_ERROR(placer.Run());
 
@@ -732,6 +736,7 @@ Status GraphExecutionState::OptimizeGraph(
 Status GraphExecutionState::BuildGraph(const BuildGraphOptions& options,
                                        std::unique_ptr<ClientGraph>* out) {
   VLOG(1) << "BuildGraph";
+  const uint64 start_time_usecs = Env::Default()->NowMicros();
   if (!graph_) {
     // It is only valid to call this method directly when the original graph
     // was created with the option `place_pruned_graph == false`.
@@ -835,7 +840,7 @@ Status GraphExecutionState::BuildGraph(const BuildGraphOptions& options,
   CopyGraph(*optimized_graph, &dense_copy->graph);
 
   // TODO(vrv): We should check invariants of the graph here.
-
+  metrics::UpdateGraphBuildTime(Env::Default()->NowMicros() - start_time_usecs);
   *out = std::move(dense_copy);
   return Status::OK();
 }

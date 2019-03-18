@@ -19,11 +19,12 @@ limitations under the License.
 
 #include "tensorflow/core/kernels/bias_op.h"
 #include "third_party/eigen3/unsupported/Eigen/CXX11/Tensor"
+#include "tensorflow/core/framework/bounds_check.h"
 #include "tensorflow/core/framework/numeric_op.h"
 #include "tensorflow/core/framework/op_kernel.h"
 #include "tensorflow/core/framework/register_types.h"
 #include "tensorflow/core/framework/tensor.h"
-#include "tensorflow/core/kernels/bounds_check.h"
+#include "tensorflow/core/kernels/redux_functor.h"
 #include "tensorflow/core/util/tensor_format.h"
 
 #if GOOGLE_CUDA
@@ -286,19 +287,15 @@ class BiasGradOp : public OpKernel {
                 .sum(reduction_axes)
                 .template cast<T>();  // End of code by intel_tf.
       } else {
+        using AccumT = typename AccumulatorType<T>::type;
+        const functor::ReduceOuterDimensions<
+            T, AccumT, Eigen::internal::scalar_sum_op<AccumT>>
+            redux;
+
         Eigen::DSizes<Eigen::Index, 2> two_dims(batch * height * width * depth,
                                                 channel);
-#ifdef EIGEN_HAS_INDEX_LIST
-        Eigen::IndexList<Eigen::type2index<0> > reduction_axis;
-#else
-        Eigen::array<Eigen::Index, 1> reduction_axis = {0};
-#endif
-        output->template flat<T>().device(context->eigen_device<Device>()) =
-            output_backprop.flat<T>()
-                .template cast<typename AccumulatorType<T>::type>()
-                .reshape(two_dims)
-                .sum(reduction_axis)
-                .template cast<T>();
+        redux(context->eigen_device<Device>(), two_dims, output_backprop,
+              output);
       }
     }
   }
