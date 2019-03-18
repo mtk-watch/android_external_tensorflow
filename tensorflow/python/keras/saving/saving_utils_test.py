@@ -24,6 +24,7 @@ import numpy as np
 
 
 from tensorflow.python import keras
+from tensorflow.python import tf2
 from tensorflow.python.client import session as session_lib
 from tensorflow.python.eager import context
 from tensorflow.python.eager import def_function
@@ -40,6 +41,7 @@ from tensorflow.python.saved_model import loader
 from tensorflow.python.saved_model import save as save_lib
 from tensorflow.python.saved_model import signature_constants
 from tensorflow.python.saved_model import tag_constants
+from tensorflow.python.training import rmsprop
 
 
 class TraceModelCallTest(keras_parameterized.TestCase):
@@ -204,6 +206,47 @@ class ModelSaveTest(keras_parameterized.TestCase):
     self.assertAllClose(
         {model.output_names[0]: model.predict_on_batch(inputs)},
         _import_and_infer(save_dir, {model.input_names[0]: np.ones((8, 5))}))
+
+
+class ExtractModelMetricsTest(test.TestCase):
+
+  def test_extract_model_metrics(self):
+    a = keras.layers.Input(shape=(3,), name='input_a')
+    b = keras.layers.Input(shape=(3,), name='input_b')
+
+    dense = keras.layers.Dense(4, name='dense')
+    c = dense(a)
+    d = dense(b)
+    e = keras.layers.Dropout(0.5, name='dropout')(c)
+
+    model = keras.models.Model([a, b], [d, e])
+    extract_metrics = saving_utils.extract_model_metrics(model)
+    self.assertEqual(None, extract_metrics)
+
+    extract_metric_names = [
+        'dense_binary_accuracy', 'dropout_binary_accuracy',
+        'dense_mean_squared_error', 'dropout_mean_squared_error'
+    ]
+    if tf2.enabled():
+      extract_metric_names.extend(['dense_mae', 'dropout_mae'])
+    else:
+      extract_metric_names.extend(
+          ['dense_mean_absolute_error', 'dropout_mean_absolute_error'])
+
+    model_metric_names = ['loss', 'dense_loss', 'dropout_loss'
+                         ] + extract_metric_names
+    model.compile(
+        loss='mae',
+        metrics=[
+            keras.metrics.BinaryAccuracy(), 'mae',
+            keras.metrics.mean_squared_error
+        ],
+        optimizer=rmsprop.RMSPropOptimizer(learning_rate=0.01),
+        run_eagerly=None)
+    extract_metrics = saving_utils.extract_model_metrics(model)
+    self.assertEqual(set(model_metric_names), set(model.metrics_names))
+    self.assertEqual(set(extract_metric_names), set(extract_metrics.keys()))
+
 
 if __name__ == '__main__':
   test.main()

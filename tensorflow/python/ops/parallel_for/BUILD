@@ -31,6 +31,7 @@ py_library(
         "//tensorflow/python:framework_ops",
         "//tensorflow/python:functional_ops",
         "//tensorflow/python:gradients",
+        "//tensorflow/python:map_fn",
         "//tensorflow/python:math_ops",
         "//tensorflow/python:nn_ops",
         "//tensorflow/python:platform",
@@ -56,7 +57,7 @@ py_library(
         "//tensorflow/python:data_flow_ops",
         "//tensorflow/python:dtypes",
         "//tensorflow/python:framework_ops",
-        "//tensorflow/python:functional_ops",
+        "//tensorflow/python:map_fn",
         "//tensorflow/python:math_ops",
         "//tensorflow/python:nn_ops",
         "//tensorflow/python:platform",
@@ -114,6 +115,7 @@ cuda_py_test(
         "//tensorflow/python:random_ops",
         "//tensorflow/python:util",
     ],
+    tags = ["no_rocm"],
     xla_enable_strict_auto_jit = True,
 )
 
@@ -129,6 +131,7 @@ cuda_py_test(
         "//tensorflow/python:util",
         "//tensorflow/python/eager:backprop",
     ],
+    xla_enable_strict_auto_jit = True,
 )
 
 cuda_py_test(
@@ -143,6 +146,7 @@ cuda_py_test(
         "//tensorflow/python:util",
     ],
     tags = ["optonly"],  # Too slow in non-opt mode
+    xla_enable_strict_auto_jit = True,
 )
 
 py_library(
