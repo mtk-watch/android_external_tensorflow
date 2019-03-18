@@ -28,9 +28,11 @@ from tensorflow.python.data.ops import dataset_ops
 from tensorflow.python.distribute import distribute_lib
 from tensorflow.python.eager import test
 from tensorflow.python.framework import random_seed
+from tensorflow.python.framework import test_util
 from tensorflow.python.keras import testing_utils
 from tensorflow.python.keras.engine import distributed_training_utils
 from tensorflow.python.keras.optimizer_v2 import gradient_descent as gradient_descent_keras
+from tensorflow.python.keras.utils.mode_keys import ModeKeys
 from tensorflow.python.ops.parsing_ops import gen_parsing_ops
 from tensorflow.python.training import gradient_descent
 from tensorflow.python.training import rmsprop
@@ -316,15 +318,19 @@ def all_strategy_combinations():
   return strategy_minus_tpu_combinations() + tpu_strategy_combinations()
 
 
-# TODO(priyag): Add v2 optimizers here.
 def strategy_and_optimizer_combinations():
   return combinations.times(
       all_strategy_combinations(),
-      combinations.combine(
-          optimizer=[combinations.adagrad_optimizer_v1_fn,
-                     combinations.adam_optimizer_v1_fn,
-                     combinations.gradient_descent_optimizer_v1_fn,
-                     combinations.rmsprop_optimizer_v1_fn]))
+      combinations.combine(optimizer=[
+          combinations.adagrad_optimizer_v1_fn,
+          combinations.adagrad_optimizer_keras_v2_fn,
+          combinations.adam_optimizer_v1_fn,
+          combinations.adam_optimizer_keras_v2_fn,
+          combinations.gradient_descent_optimizer_v1_fn,
+          combinations.gradient_descent_optimizer_keras_v2_fn,
+          combinations.rmsprop_optimizer_v1_fn,
+          combinations.rmsprop_optimizer_keras_v2_fn
+      ]))
 
 
 def strategy_and_input_combinations():
@@ -350,6 +356,7 @@ def strategy_for_numpy_input_combinations():
       mode=['graph'])
 
 
+@test_util.run_v1_only('model.compile(..distribute=..) only works in TF v1')
 class TestDistributionStrategyWithNumpyArrays(test.TestCase,
                                               parameterized.TestCase):
 
@@ -458,6 +465,7 @@ class TestDistributionStrategyWithNumpyArrays(test.TestCase,
       self.assertAllEqual([6, 7], outs[1].shape)
 
 
+@test_util.run_v1_only('model.compile(..distribute=..) only works in TF v1')
 class TestDistributionStrategyWithDatasets(test.TestCase,
                                            parameterized.TestCase):
 
@@ -741,13 +749,16 @@ class TestDistributionStrategyWithDatasets(test.TestCase,
 
       model.fit(dataset, epochs=1, steps_per_epoch=2, verbose=0,
                 callbacks=[keras.callbacks.LearningRateScheduler(schedule)])
-      grouped_models = distribution.unwrap(model._distributed_model)
+      grouped_models = distribution.experimental_local_results(
+          distributed_training_utils.get_distributed_model(
+              model, ModeKeys.TRAIN))
       with distribution.scope():
         for m in grouped_models:
           self.assertAllClose(0.001, keras.backend.get_value(
               m.optimizer.lr), atol=1e-05, rtol=1e-05)
 
 
+@test_util.run_v1_only('model.compile(..distribute=..) only works in TF v1')
 class TestDistributionStrategyErrorCases(test.TestCase, parameterized.TestCase):
 
   @combinations.generate(combinations.combine(
@@ -787,16 +798,21 @@ class TestDistributionStrategyErrorCases(test.TestCase, parameterized.TestCase):
             verbose=0,
             sample_weight=sample_weight)
 
-      # Test with not specifying the `steps` argument.
-      with self.assertRaisesRegexp(
-          ValueError, 'the `steps_per_epoch` argument'):
+      # Test with not specifying the `steps` argument for dataset with
+      # infinite cardinality.
+      dataset = dataset.repeat()
+      with self.assertRaisesRegexp(ValueError, 'When passing an infinitely '
+                                   'repeating dataset, you must specify the '
+                                   '`steps_per_epoch` argument'):
         model.fit(dataset, epochs=1, verbose=0)
-      with self.assertRaisesRegexp(ValueError,
-                                   'the `steps` argument'):
+      with self.assertRaisesRegexp(ValueError, 'When passing an infinitely '
+                                   'repeating dataset, you must specify the '
+                                   '`steps` argument'):
         model.evaluate(dataset, verbose=0)
 
-      with self.assertRaisesRegexp(ValueError,
-                                   'the `steps` argument'):
+      with self.assertRaisesRegexp(ValueError, 'When passing an infinitely '
+                                   'repeating dataset, you must specify the '
+                                   '`steps` argument'):
         model.predict(dataset, verbose=0)
 
   @combinations.generate(combinations.combine(
@@ -830,6 +846,7 @@ class TestDistributionStrategyErrorCases(test.TestCase, parameterized.TestCase):
                   callbacks=[keras.callbacks.ReduceLROnPlateau()])
 
 
+@test_util.run_v1_only('model.compile(..distribute=..) only works in TF v1')
 class TestDistributionStrategyWithLossMasking(test.TestCase,
                                               parameterized.TestCase):
 
@@ -860,6 +877,7 @@ class TestDistributionStrategyWithLossMasking(test.TestCase,
       self.assertEqual(hist.history['loss'][0], 0)
 
 
+@test_util.run_v1_only('model.compile(..distribute=..) only works in TF v1')
 class TestDistributionStrategyWithNormalizationLayer(
     test.TestCase, parameterized.TestCase):
 
@@ -892,6 +910,7 @@ class TestDistributionStrategyWithNormalizationLayer(
       np.testing.assert_allclose(out.std(), 1.0, atol=1e-1)
 
 
+@test_util.run_v1_only('model.compile(..distribute=..) only works in TF v1')
 class TestDistributionStrategyCorrectness(test.TestCase,
                                           parameterized.TestCase):
 

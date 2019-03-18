@@ -53,7 +53,7 @@ class ServiceOptions {
   ServiceOptions& set_platform(se::Platform* platform);
   se::Platform* platform() const;
 
-  // Set the number of replicas to use when compiling replicated
+  // Set the default number of replicas to use when compiling replicated
   // programs.
   ServiceOptions& set_number_of_replicas(int number_of_replicas);
   int number_of_replicas() const;
@@ -274,10 +274,6 @@ class Service : public ServiceInterface {
   // represents a set of physical devices for the replicas.
   StatusOr<std::vector<se::StreamExecutor*>> Replicas(
       const Backend& backend, const DeviceHandle& device_handle) const;
-
-  // Dumps the (unoptimized) module given if the corresponding DebugOptions
-  // field has been set.
-  Status MaybeDumpUnoptimizedHloModule(const HloModule& module) const;
 
   // Returns the device handle that represents the replicated device for a
   // single computation that is not model-parallelized.

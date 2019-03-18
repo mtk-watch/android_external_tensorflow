@@ -20,11 +20,12 @@ from __future__ import print_function
 
 import copy
 
-from tensorflow.contrib.distribute.python import mirrored_strategy
+
 from tensorflow.python.distribute import cross_device_ops as cross_device_ops_lib
 from tensorflow.python.distribute import device_util
 from tensorflow.python.distribute import distribute_lib
 from tensorflow.python.distribute import input_lib
+from tensorflow.python.distribute import mirrored_strategy
 from tensorflow.python.distribute import multi_worker_util
 from tensorflow.python.distribute import numpy_dataset
 from tensorflow.python.distribute import values
@@ -39,12 +40,14 @@ from tensorflow.python.ops import variable_scope as vs
 from tensorflow.python.platform import tf_logging as logging
 from tensorflow.python.training import device_setter
 from tensorflow.python.util import nest
+from tensorflow.python.util.tf_export import tf_export
 
 _LOCAL_CPU = "/device:CPU:0"
 _LOCAL_GPU_0 = "/device:GPU:0"
 
 
 # TODO(yuefengz): maybe cache variables on local CPU.
+@tf_export("distribute.experimental.ParameterServerStrategy")
 class ParameterServerStrategy(distribute_lib.DistributionStrategy):
   """A parameter server DistributionStrategy.
 
@@ -101,16 +104,13 @@ class ParameterServerStrategyExtended(
 
     # We typically don't need to do all-reduce in this strategy.
     self._cross_device_ops = (
-        cross_device_ops_lib.ReductionToOneDeviceCrossDeviceOps(
-            reduce_to_device=_LOCAL_CPU))
+        cross_device_ops_lib.ReductionToOneDevice(reduce_to_device=_LOCAL_CPU))
 
   def _initialize_strategy(self, cluster_resolver):
     if cluster_resolver.cluster_spec().as_dict():
       self._initialize_multi_worker(cluster_resolver)
     else:
       self._initialize_local(cluster_resolver)
-    # Save the num_gpus_per_worker for configure method.
-    self._num_gpus_per_worker = cluster_resolver.num_accelerators()
 
   def _initialize_multi_worker(self, cluster_resolver):
     """Initialize devices for multiple workers.
@@ -127,10 +127,19 @@ class ParameterServerStrategyExtended(
     Raises:
       ValueError: if the cluster doesn't have ps jobs.
     """
-    num_gpus = cluster_resolver.num_accelerators()
+    # TODO(b/126786766): TFConfigClusterResolver returns wrong number of GPUs in
+    # some cases.
+    if isinstance(cluster_resolver, TFConfigClusterResolver):
+      num_gpus = context.num_gpus()
+    else:
+      num_gpus = cluster_resolver.num_accelerators().get("GPU", 0)
+
+    # Save the num_gpus_per_worker for configure method.
+    self._num_gpus_per_worker = num_gpus
+
     cluster_spec = cluster_resolver.cluster_spec()
     task_type = cluster_resolver.task_type
-    task_id = cluster_resolver.task_index
+    task_id = cluster_resolver.task_id
     if not task_type or task_id is None:
       raise ValueError("When `cluster_spec` is given, you must also specify "
                        "`task_type` and `task_id`")
@@ -198,7 +207,17 @@ class ParameterServerStrategyExtended(
     """Initialize internal devices for local training."""
     worker_device = device_util.canonicalize("/device:CPU:0")
     self._input_host_device = numpy_dataset.SingleDevice(worker_device)
-    num_gpus = cluster_resolver.num_accelerators()
+
+    # TODO(b/126786766): TFConfigClusterResolver returns wrong number of GPUs in
+    # some cases.
+    if isinstance(cluster_resolver, TFConfigClusterResolver):
+      num_gpus = context.num_gpus()
+    else:
+      num_gpus = cluster_resolver.num_accelerators().get("GPU", 0)
+
+    # Save the num_gpus_per_worker for configure method.
+    self._num_gpus_per_worker = num_gpus
+
     # Define compute devices which is a list of device strings and one for each
     # replica. When there are GPUs, replicate operations on these GPUs.
     # Otherwise, place operations on CPU.
@@ -232,14 +251,6 @@ class ParameterServerStrategyExtended(
 
   def _validate_colocate_with_variable(self, colocate_with_variable):
     values.validate_colocate(colocate_with_variable, self)
-
-  def _distribute_dataset(self, dataset_fn):
-    """Distributes the dataset to each local GPU."""
-    return input_lib.PerReplicaDataset(
-        self._call_dataset_fn(dataset_fn),
-        self._input_workers,
-        0,
-        prefetch_on_device=True)
 
   def _make_dataset_iterator(self, dataset):
     return input_lib.DatasetIterator(dataset, self._input_workers,
@@ -326,7 +337,8 @@ class ParameterServerStrategyExtended(
           if kwargs.get("trainable", True):
             collections.append(ops.GraphKeys.TRAINABLE_VARIABLES)
             l = g.get_collection_ref(ops.GraphKeys.TRAINABLE_VARIABLES)
-            l.remove(v)
+            if v in l:
+              l.remove(v)
           g.add_to_collections(collections, wrapped)
         elif ops.GraphKeys.GLOBAL_STEP in collections:
           ops.add_to_collections(ops.GraphKeys.GLOBAL_STEP, wrapped)
@@ -414,7 +426,7 @@ class ParameterServerStrategyExtended(
       if group:
         return result
       else:
-        return nest.map_structure(self._unwrap, result)
+        return nest.map_structure(self._local_results, result)
 
   # TODO(yuefengz): does it need to call _select_single_value?
   def _update_non_slot(self, colocate_with, fn, args, kwargs, group):
@@ -424,9 +436,9 @@ class ParameterServerStrategyExtended(
       if group:
         return result
       else:
-        return nest.map_structure(self._unwrap, result)
+        return nest.map_structure(self._local_results, result)
 
-  def _unwrap(self, val):
+  def _local_results(self, val):
     if isinstance(val, values.DistributedValues):
       return val.values
     return (val,)
@@ -471,8 +483,8 @@ class ParameterServerStrategyExtended(
       cluster_resolver = SimpleClusterResolver(
           cluster_spec=multi_worker_util.normalize_cluster_spec(cluster_spec),
           task_type=task_type,
-          task_index=task_id,
-          num_accelerators=self._num_gpus_per_worker)
+          task_id=task_id,
+          num_accelerators={"GPU": self._num_gpus_per_worker})
       self._initialize_multi_worker(cluster_resolver)
 
     if session_config:
@@ -538,8 +550,7 @@ class ParameterServerStrategyExtended(
   def _global_batch_size(self):
     """`make_dataset_iterator` and `make_numpy_iterator` use global batch size.
 
-    `distribute_dataset` and `make_input_fn_iterator` assume per-replica
-    batching.
+    `make_input_fn_iterator` assumes per-replica batching.
 
     Returns:
       Boolean.

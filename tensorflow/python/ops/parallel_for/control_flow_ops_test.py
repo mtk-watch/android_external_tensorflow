@@ -13,11 +13,13 @@
 # limitations under the License.
 # ==============================================================================
 """Tests for pfor and for_loop."""
+# pylint: disable=g-direct-tensorflow-import
 
 from __future__ import absolute_import
 from __future__ import division
 from __future__ import print_function
 
+import functools
 import time
 
 from absl import flags
@@ -36,9 +38,9 @@ from tensorflow.python.ops import array_ops
 from tensorflow.python.ops import bitwise_ops
 from tensorflow.python.ops import control_flow_ops
 from tensorflow.python.ops import data_flow_ops
-from tensorflow.python.ops import functional_ops
 from tensorflow.python.ops import gradients as gradient_ops
 from tensorflow.python.ops import logging_ops
+from tensorflow.python.ops import map_fn
 from tensorflow.python.ops import math_ops
 from tensorflow.python.ops import nn
 from tensorflow.python.ops import parsing_ops
@@ -98,6 +100,90 @@ class PForTest(PForTestCase):
   def test_parallel_iterations_one(self):
     with self.assertRaisesRegexp(ValueError, "Use for_loop instead"):
       pfor_control_flow_ops.pfor(lambda i: 1, 8, parallel_iterations=1)
+
+
+@test_util.run_all_in_graph_and_eager_modes
+class ReductionTest(PForTestCase):
+
+  def test_reduce_concat(self):
+    x = random_ops.random_uniform([8, 3])
+
+    def loop_fn(i, pfor_config):
+      x_i = array_ops.gather(x, i)
+      vectorized_value = pfor_config.reduce_concat(x_i)
+      mean_value = math_ops.reduce_mean(vectorized_value, axis=0)
+      return x_i - mean_value
+
+    output = pfor_control_flow_ops.pfor(loop_fn, 8)
+    ans = x - math_ops.reduce_mean(x, axis=0)
+    output_val, ans_val = self.evaluate([output, ans])
+    self.assertAllClose(ans_val, output_val)
+
+  def test_reduce_mean(self):
+    x = random_ops.random_uniform([8, 3])
+
+    def loop_fn(i, pfor_config):
+      x_i = array_ops.gather(x, i)
+      return x_i - pfor_config.reduce_mean(x_i)
+
+    output = pfor_control_flow_ops.pfor(loop_fn, 8)
+    ans = x - math_ops.reduce_mean(x, axis=0)
+    output_val, ans_val = self.evaluate([output, ans])
+    self.assertAllClose(ans_val, output_val)
+
+  def test_reduce_sum(self):
+    x = random_ops.random_uniform([8, 3])
+
+    def loop_fn(i, pfor_config):
+      x_i = array_ops.gather(x, i)
+      return x_i - pfor_config.reduce_sum(x_i)
+
+    output = pfor_control_flow_ops.pfor(loop_fn, 8)
+    ans = x - math_ops.reduce_sum(x, axis=0)
+    output_val, ans_val = self.evaluate([output, ans])
+    self.assertAllClose(ans_val, output_val)
+
+  def test_reduce_class(self):
+    x = random_ops.random_uniform([8, 3])
+
+    class LoopFn(object):
+
+      def __init__(self):
+        pass
+
+      def __call__(self, i, pfor_config):
+        x_i = array_ops.gather(x, i)
+        return x_i - pfor_config.reduce_mean(x_i)
+
+    output = pfor_control_flow_ops.pfor(LoopFn(), 8)
+    ans = x - math_ops.reduce_mean(x, axis=0)
+    output_val, ans_val = self.evaluate([output, ans])
+    self.assertAllClose(ans_val, output_val)
+
+  def test_reduce_functools_partial(self):
+    x = random_ops.random_uniform([8, 3])
+
+    def fn(i, pfor_config, dummy=None):
+      del dummy
+      x_i = array_ops.gather(x, i)
+      return x_i - pfor_config.reduce_mean(x_i)
+
+    loop_fn = functools.partial(fn, dummy=1)
+    output = pfor_control_flow_ops.pfor(loop_fn, 8)
+    ans = x - math_ops.reduce_mean(x, axis=0)
+    output_val, ans_val = self.evaluate([output, ans])
+    self.assertAllClose(ans_val, output_val)
+
+  def test_parallel_iterations(self):
+    x = random_ops.random_uniform([8, 3])
+
+    def loop_fn(i, pfor_config):
+      x_i = array_ops.gather(x, i)
+      return pfor_config.reduce_sum(x_i)
+
+    with self.assertRaisesRegexp(
+        ValueError, "parallel_iterations currently unsupported"):
+      pfor_control_flow_ops.pfor(loop_fn, 8, parallel_iterations=2)
 
 
 @test_util.run_all_in_graph_and_eager_modes
@@ -928,15 +1014,15 @@ class Benchmarks(test.Benchmark):
       b = 256
       params = 1000
       inp = random_ops.random_normal((b, params))
-      map_fn = lambda x: x * x
+      fn = lambda x: x * x
 
       def pfor_map_fn(f, x):
         return pfor_control_flow_ops.pfor(
             lambda i: f(array_ops.gather(x, i)),
             array_ops.shape(x)[0])
 
-      map_output = functional_ops.map_fn(map_fn, inp)
-      pfor_output = pfor_map_fn(map_fn, inp)
+      map_output = map_fn.map_fn(fn, inp)
+      pfor_output = pfor_map_fn(fn, inp)
 
       self._run(map_output, 100, name="tf_map_fn")
       self._run(pfor_output, 100, name="pfor_map_fn")
@@ -964,6 +1050,26 @@ class Benchmarks(test.Benchmark):
                                                      128, 512, 16)
       self._run(pfor_outputs, 100, name="pfor_rnn")
       self._run(tf_outputs, 100, name="tf_rnn")
+
+  def benchmark_reduction(self):
+    n = 1024
+    with ops.Graph().as_default():
+      x = random_ops.random_uniform([n, n])
+      w = random_ops.random_uniform([n, n])
+
+      def loop_fn(i, pfor_config):
+        x_i = array_ops.gather(x, i)
+        return math_ops.reduce_sum(
+            math_ops.matmul(pfor_config.reduce_concat(x_i), w))
+
+      # Note that output_reduction will be tiled, so there may be some minor
+      # overheads compared to output_no_reduction.
+      output_reduction = pfor_control_flow_ops.pfor(loop_fn, n)
+      output_no_reduction = math_ops.reduce_sum(math_ops.matmul(x, w))
+      # Benchmark to test that reduction does not add overhead and its output is
+      # treated as loop invariant.
+      self._run(output_reduction, 30, name="matmul_reduction")
+      self._run(output_no_reduction, 30, name="matmul_no_reduction")
 
 
 class SparseTest(PForTestCase):

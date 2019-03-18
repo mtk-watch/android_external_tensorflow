@@ -1435,8 +1435,9 @@ static void PackRhsHelper(int iters,
       /*Alignment*/ 0>;
 
 #if defined(TENSORFLOW_USE_MKLDNN_CONTRACTION_KERNEL)
-  using PackRhsImpl = Eigen::internal::mkldnn_gemm_pack<float, Eigen::Index,
-                                                        SubMapper, ColMajor>;
+  using PackRhsImpl =
+      Eigen::internal::gemm_pack_colmajor_block<float, Eigen::Index, SubMapper,
+                                                ColMajor>;
 #else
   using PackRhsImpl =
       Eigen::internal::gemm_pack_rhs<float, Eigen::Index, SubMapper,  //
@@ -1606,9 +1607,11 @@ static void PackLhsHelper(int iters,
       /*Alignment*/ 0>;
 
 #if defined(TENSORFLOW_USE_MKLDNN_CONTRACTION_KERNEL)
-  using PackLhsImpl = Eigen::internal::mkldnn_gemm_pack<float, Eigen::Index,
-                                                        SubMapper, ColMajor>;
+  using PackLhsImpl =
+      Eigen::internal::gemm_pack_colmajor_block<float, Eigen::Index, SubMapper,
+                                                ColMajor>;
 #else
+  using Traits = typename Eigen::internal::gebp_traits<float, float>;
   using PackLhsImpl =
       Eigen::internal::gemm_pack_lhs<float, Eigen::Index, SubMapper,      //
                                      Traits::mr,                          //
@@ -1697,9 +1700,9 @@ static void PackLhsHelper(int iters,
     SubMapper sub_mapper =
         input_mappers[filter_idx].getSubMapper(row_offset, col_offset);
 
-    // NOTE: Eigen gemm_pack_lhs accepts contraction depth (k-th dimension) as a
-    // first argument (aka block cols). MKL-DNN pack is generic for lhs and rhs
-    // and accepts block rows and cols in the same order for lhs and rhs.
+// NOTE: Eigen gemm_pack_lhs accepts contraction depth (k-th dimension) as a
+// first argument (aka block cols). MKL-DNN pack is generic for lhs and rhs
+// and accepts block rows and cols in the same order for lhs and rhs.
 #if defined(TENSORFLOW_USE_MKLDNN_CONTRACTION_KERNEL)
     pack_lhs(packed.data() + packed_offset, sub_mapper, rows, cols);
 #else
@@ -1720,7 +1723,7 @@ static void PackLhsHelper(int iters,
 //    H: height
 //    W: width
 //    C: input channels
-//   FC: filter channles
+//   FC: filter channels
 //   FH: filter height
 //   FW: filter width
 //   SH: stride in height dimensions
