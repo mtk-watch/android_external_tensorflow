@@ -41,7 +41,16 @@ limitations under the License.
 #include "tensorflow/core/public/session_options.h"
 #include "tensorflow/core/public/version.h"
 
+struct TF_Operation;
+
 namespace tensorflow {
+
+// This struct is isomorphic to TF_Output, but we cannot use the latter here due
+// to layering concerns (TF_Output is defined at the C API layer).
+struct OutputGraphNode {
+  TF_Operation* oper;
+  int index;  // The index of the output within oper.
+};
 
 // Associates a Tensor and a Device, used in the eager runtime. Internal version
 // of the TFE_TensorHandle struct and the python EagerTensor class
@@ -58,7 +67,11 @@ class TensorHandle : public core::RefCounted {
                DataType dtype, std::function<void()> call_on_destroy, Device* d,
                Device* op_device, Device* resource_device, EagerContext* ctx);
 
+  // Symbolic tensor constructor.
+  TensorHandle(OutputGraphNode symbolic_tensor, DataType dtype);
+
   ~TensorHandle() override {
+    VLOG(1) << "Deleting internal TensorHandle " << this;
     if (call_on_destroy_) {
       call_on_destroy_();
     }
@@ -114,9 +127,13 @@ class TensorHandle : public core::RefCounted {
 
   bool IsRemote();
 
+  OutputGraphNode* getSymbolicTensor() const { return symbolic_tensor.get(); }
+
+  string DebugString() const;
+
  private:
   // If the contents of the Tensor pointed to by this handle is yet to be
-  // computed by a EagerNode, this function will block till that compuatation is
+  // computed by a EagerNode, this function will block till that computation is
   // done and the handle is "ready".
   Status WaitReady();
   Status WaitForNode(uint64 node_id, bool return_if_is_ready);
@@ -141,6 +158,9 @@ class TensorHandle : public core::RefCounted {
 
   // Device in which the op producing this tensor was executed. Equals to
   // device_ for constant tensors.
+  // Can be nullptr if the op producing this tensor was a function executed
+  // with function library runtime or if this tensor represents a symbolic
+  // tensor.
   tensorflow::Device* const op_device_;
 
   // If the tensor dtype is DT_RESOURCE, resource_device_ holds the device
@@ -165,6 +185,11 @@ class TensorHandle : public core::RefCounted {
   // `ctx` object is not owned and should outlive this handle.
   EagerContext* ctx_ GUARDED_BY(ctx_mutex_);
   bool is_ready_ GUARDED_BY(ctx_mutex_);
+
+  // When non-NULL, this tensor handle instance represents a symbolic tensor
+  // (corresponding to a graph node), whose concrete value is to be produced by
+  // executing that graph node.
+  std::unique_ptr<OutputGraphNode> symbolic_tensor;
 };
 
 // If tensor's dtype is DT_RESOURCE, returns the device backing the resource.
