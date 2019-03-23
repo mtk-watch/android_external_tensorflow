@@ -25,7 +25,14 @@ namespace tflite {
 //   interpreter->ModifyGraphWithDelegate(&delegate);
 // NnApiDelegate() returns a singleton, so you should not free this
 // pointer or worry about its lifetime.
-TfLiteDelegate* NnApiDelegate();
+//
+// NOTE: The following are experimental and subject to change.
+// User could provide a string representing the name of specified NNAPI
+// accelerator. If an accelerator can be found based on the provided name,
+// the delegate will try to compile and run the model use only the selected
+// accelerator. An error will occur if the accelerator could not be found.
+// It is the user's responsibility to handle errors from a specific accelerator.
+TfLiteDelegate* NnApiDelegate(const char* device_name = nullptr);
 }  // namespace tflite
 
 #endif  // TENSORFLOW_LITE_DELEGATES_NNAPI_NNAPI_DELEGATE_H_
