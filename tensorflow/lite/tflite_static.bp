@@ -147,6 +147,7 @@ cc_library_static {
         "-Werror",
         "-Wextra",
         "-Wno-array-bounds",
+        "-Wno-deprecated-declarations",
         "-Wno-extern-c-compat",
         "-Wno-invalid-partial-specialization",
         "-Wno-mismatched-tags",
