@@ -1408,8 +1408,13 @@ TfLiteDelegate* NnApiDelegate(const char* device_name) {
       .flags = kTfLiteDelegateFlagsNone,
   };
   static std::string device_name_;
-  device_name_ = device_name;
-  delegate.data_ = (void *) device_name_.c_str();
+  if (device_name == nullptr) {
+      device_name_.clear();
+      delegate.data_ = nullptr;
+  } else {
+      device_name_ = device_name;
+      delegate.data_ = (void *) device_name_.c_str();
+  }
   return &delegate;
 }
 
