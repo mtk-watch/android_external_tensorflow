@@ -1327,9 +1327,9 @@ const TfLiteRegistration NNAPIDelegateKernel::registration = {
       },
 
       .prepare = [](TfLiteContext* context, TfLiteNode* node) -> TfLiteStatus {
-        // Since the underlying resize happened ahead of delegation
-        // worked. This does nothing.
-        return kTfLiteOk;
+        NNAPIDelegateKernel* state =
+            reinterpret_cast<NNAPIDelegateKernel*>(node->user_data);
+        return state->nn_compilation_ == nullptr ? kTfLiteError : kTfLiteOk;
       },
 
       .invoke = [](TfLiteContext* context, TfLiteNode* node) -> TfLiteStatus {
