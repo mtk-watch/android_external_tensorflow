@@ -1129,6 +1129,10 @@ class NNAPIDelegateKernel {
     return kTfLiteOk;
   }
 
+  // NN API Delegate Registration (the pseudo kernel that will invoke NN
+  // API node sub sets)
+  static const TfLiteRegistration registration;
+
  private:
   // Access to NNApi.
   const NnApi* nnapi_;
@@ -1308,6 +1312,36 @@ class NNAPIDelegateKernel {
   }
 };
 
+const TfLiteRegistration NNAPIDelegateKernel::registration = {
+      .init = [](TfLiteContext* context, const char* buffer,
+                 size_t length) -> void* {
+        const TfLiteDelegateParams* params =
+            reinterpret_cast<const TfLiteDelegateParams*>(buffer);
+        NNAPIDelegateKernel* kernel_state = new NNAPIDelegateKernel;
+        kernel_state->Init(context, params);
+        return kernel_state;
+      },
+
+      .free = [](TfLiteContext* context, void* buffer) -> void {
+        delete reinterpret_cast<NNAPIDelegateKernel*>(buffer);
+      },
+
+      .prepare = [](TfLiteContext* context, TfLiteNode* node) -> TfLiteStatus {
+        // Since the underlying resize happened ahead of delegation
+        // worked. This does nothing.
+        return kTfLiteOk;
+      },
+
+      .invoke = [](TfLiteContext* context, TfLiteNode* node) -> TfLiteStatus {
+        NNAPIDelegateKernel* state =
+            reinterpret_cast<NNAPIDelegateKernel*>(node->user_data);
+        return state->Invoke(context, node);
+      },
+
+      .profiling_string = nullptr,
+      .builtin_code = kTfLiteBuiltinDelegate,
+  };
+
 }  // namespace
 
 // Return a NN API Delegate struct that can check for support of ops.
@@ -1360,44 +1394,10 @@ TfLiteDelegate* NnApiDelegate(const char* device_name) {
         // First element in vector must be the number of actual nodes.
         supported_nodes[0] = supported_nodes.size() - 1;
 
-        // NN API Delegate Registration (the pseudo kernel that will invoke NN
-        // API node sub sets)
-        static const TfLiteRegistration nnapi_delegate_kernel = {
-            .init = [](TfLiteContext* context, const char* buffer,
-                       size_t length) -> void* {
-              const TfLiteDelegateParams* params =
-                  reinterpret_cast<const TfLiteDelegateParams*>(buffer);
-              NNAPIDelegateKernel* kernel_state = new NNAPIDelegateKernel;
-              kernel_state->Init(context, params);
-              return kernel_state;
-            },
-
-            .free = [](TfLiteContext* context, void* buffer) -> void {
-              delete reinterpret_cast<NNAPIDelegateKernel*>(buffer);
-            },
-
-            .prepare = [](TfLiteContext* context,
-                          TfLiteNode* node) -> TfLiteStatus {
-              // Since the underlying resize happened ahead of delegation
-              // worked. This does nothing.
-              return kTfLiteOk;
-            },
-
-            .invoke = [](TfLiteContext* context,
-                         TfLiteNode* node) -> TfLiteStatus {
-              NNAPIDelegateKernel* state =
-                  reinterpret_cast<NNAPIDelegateKernel*>(node->user_data);
-              return state->Invoke(context, node);
-            },
-
-            .profiling_string = nullptr,
-            .builtin_code = kTfLiteBuiltinDelegate,
-        };
-
         // Request TFLite to partition the graph and make kernels
-        // for each independent node sub set a new nnapi_delegate_kernel.
+        // for each independent node sub set a new NNAPIDelegateKernel.
         return context->ReplaceNodeSubsetsWithDelegateKernels(
-            context, nnapi_delegate_kernel,
+            context, NNAPIDelegateKernel::registration,
             reinterpret_cast<TfLiteIntArray*>(supported_nodes.data()),
             delegate);
       },
