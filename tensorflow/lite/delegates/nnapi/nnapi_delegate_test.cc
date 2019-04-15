@@ -18,6 +18,20 @@ limitations under the License.
 #include "tensorflow/lite/kernels/test_util.h"
 #include "tensorflow/lite/model.h"
 
+namespace testing {
+namespace internal {
+
+// The CTS test fails to compile without this.
+// TODO(b/130342510): Find a proper solution.
+std::string FormatMatcherDescription(bool unused_negation,
+                                     const char* matcher_name,
+                                     const Strings& unused_param_values) {
+  return matcher_name;
+}
+
+}  // namespace internal
+}  // namespace testing
+
 namespace tflite {
 namespace {
 
