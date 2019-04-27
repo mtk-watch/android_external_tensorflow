@@ -91,7 +91,16 @@ bool IsHybridOperator(const TfLiteContext* context, int builtin_code,
 constexpr int32_t kMinSdkVersionForNNAPI = 27;
 constexpr int32_t kMinSdkVersionForNNAPI11 = 28;
 constexpr int32_t kMinSdkVersionForNNAPI12 = 29;
+constexpr size_t kDefaultByteAlignmentForNNAPI = 16;
 
+static size_t getNumPaddingBytes(size_t byte_size) {
+  size_t num_padding_bytes = 0;
+  if (byte_size % kDefaultByteAlignmentForNNAPI) {
+    num_padding_bytes = kDefaultByteAlignmentForNNAPI -
+                        (byte_size % kDefaultByteAlignmentForNNAPI);
+  }
+  return num_padding_bytes;
+}
 }  // namespace
 
 // RAII NN API Model Destructor for use with std::unique_ptr
@@ -1070,6 +1079,7 @@ class NNAPIDelegateKernel {
                 execution, relative_input_index, nullptr,
                 nn_input_memory_->get_handle(), input_offset, tensor->bytes));
         input_offset += tensor->bytes;
+        input_offset += getNumPaddingBytes(tensor->bytes);
         relative_input_index++;
       }
     }
@@ -1085,6 +1095,7 @@ class NNAPIDelegateKernel {
               execution, relative_output_index, nullptr,
               nn_output_memory_->get_handle(), output_offset, tensor->bytes));
       output_offset += tensor->bytes;
+      output_offset += getNumPaddingBytes(tensor->bytes);
       relative_output_index++;
     }
 
@@ -1124,6 +1135,7 @@ class NNAPIDelegateKernel {
       memcpy(tensor->data.raw,
              nn_output_memory_->get_data_ptr() + output_offset, tensor->bytes);
       output_offset += tensor->bytes;
+      output_offset += getNumPaddingBytes(tensor->bytes);
     }
 
     return kTfLiteOk;
@@ -1270,6 +1282,7 @@ class NNAPIDelegateKernel {
           context->tensors[i].allocation_type != kTfLiteMmapRo) {
         inputs.push_back(operand_mapping_.lite_index_to_ann(i));
         total_input_byte_size += context->tensors[i].bytes;
+        total_input_byte_size += getNumPaddingBytes(context->tensors[i].bytes);
       }
     }
 
@@ -1277,6 +1290,7 @@ class NNAPIDelegateKernel {
     for (int i : TfLiteIntArrayView(output_tensors)) {
       outputs.push_back(operand_mapping_.lite_index_to_ann(i));
       total_output_byte_size += context->tensors[i].bytes;
+      total_output_byte_size += getNumPaddingBytes(context->tensors[i].bytes);
     }
 
     // Add state output tensors as model outputs.
